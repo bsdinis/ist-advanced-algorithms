@@ -19,5 +19,8 @@ fmt:
 tidy:
 	@clang-tidy project.cc
 
+test: project
+	@sbin/test.sh
+
 clean:
 	@rm -f project project.o
