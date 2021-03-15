@@ -1,25 +1,24 @@
-CXXFLAGS = -Wall -Wextra -Wshadow -Wnon-virtual-dtor -Wold-style-cast -Wcast-align -Wunused -Woverloaded-virtual -Wpedantic -Wconversion -Wsign-conversion -Wnull-dereference -Wdouble-promotion
-CXXFLAGS += -std=c++17
+CFLAGS = -Wall -Wextra -Wshadow -Wcast-align -Wunused -Wpedantic -Wconversion -Wsign-conversion -Wnull-dereference -Wdouble-promotion
 
-CXXFLAGS += -fsanitize=address,leak
-#CXXFLAGS += -fthread
-#CXXFLAGS += -fmemory
+CFLAGS += -fsanitize=address,leak
+#CFLAGS += -fsanitize=thread
+#CFLAGS += -fsanitize=memory
 
 # debug setting
-CXXFLAGS += -O0 -g
+CFLAGS += -O0 -g
 
 # perf setting
-# CXXFLAGS += -O3 -flto -DNDEBUG
+# CFLAGS += -O3 -flto -DNDEBUG
 
 all: project
 
-project: project.cc
+project: project.c
 
 fmt:
-	@clang-format -i -style=file project.cc
+	@clang-format -i -style=file project.c
 
 tidy:
-	@clang-tidy project.cc
+	@clang-tidy project.c
 
 test: project
 	@sbin/test.sh
