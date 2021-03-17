@@ -454,39 +454,41 @@ static void kmp(text_t const *text, pattern_t const *pat) {
     ssize_t q = 0;
     ssize_t comparisons = 0;
 
-    LOG("KMP:\nt| %.*s\t [size = %zd]\np| %.*s\t [size = %zd]\n",
-        (int)text->t_size, text->t_str, text->t_size, (int)pat->p_size,
-        pat->p_str, pat->p_size);
+    // LOG("KMP:\nt| %.*s\t [size = %zd]\np| %.*s\t [size = %zd]\n",
+    //     (int)text->t_size, text->t_str, text->t_size, (int)pat->p_size,
+    //     pat->p_str, pat->p_size);
 
     // the guard should be (i + (pat->p_size - 1) < text->t_size)
     //
     for (ssize_t i = 0; i < text->t_size; ++i) {
-        LOG("checking [%zd]:\nt| %.*s\np| %.*s\n", i,
-            (int)min_i64(i, pat->p_size),
-            text->t_str + max_i64(0, i + 1 - pat->p_size),
-            (int)min_i64(i, pat->p_size), pat->p_str);
+        // LOG("checking [%zd]:\nt| %.*s\np| %.*s\n", i,
+        //     (int)min_i64(i, pat->p_size),
+        //     text->t_str + max_i64(0, i + 1 - pat->p_size),
+        //     (int)min_i64(i, pat->p_size), pat->p_str);
         while (q > 0 && pat->p_pat[q] != text->t_text[i]) {
             comparisons++;
-            LOG("comparisons++: %zd", comparisons);
+            //LOG("comparisons++: %zd", comparisons);
             q = preffix[q];  // NOLINT : pattern_preffix makes sure that this is
                              // not garbage
         }
 
         comparisons++;  // this next comparison
-        LOG("comparisons++: %zd", comparisons);
+        // LOG("comparisons++: %zd", comparisons);
         if (pat->p_pat[q] == text->t_text[i]) {
             q++;
         }
 
         if (q == pat->p_size) {
-            LOG("success  [%zd]", i + 1 - pat->p_size);
+            // LOG("success  [%zd]", i + 1 - pat->p_size);
             fprintf(stdout, "%zd ", i + 1 - pat->p_size);
-            comparisons++;
-            LOG("comparisons++: %zd", comparisons);
-            q = preffix[q - 1];  // NOLINT : pattern_preffix makes sure that
+            if (i < text->t_size-1) { // Is it really this if?? Why not...
+                comparisons++;
+                //LOG("comparisons++: %zd", comparisons);
+                q = preffix[q - 1];  // NOLINT : pattern_preffix makes sure that
+            }
                                  // this is not garbage
         }
-        fprintf(stderr, "----------------------\n");
+        //fprintf(stderr, "----------------------\n");
     }
 
     fprintf(stdout, "\n%zd \n", comparisons);
