@@ -166,7 +166,7 @@ static ssize_t readline_into_buffer(FILE *stream, dna_t **in_buffer,
     while (ch != '\n' && ch != EOF) {
         if (size == capacity - 1) {
             capacity *= 2;
-            buffer = xrealloc(buffer, (size_t)capacity);
+            buffer = xrealloc(buffer, (size_t)capacity * sizeof(dna_t));
         }
 
         buffer[size++] = char_to_dna(ch);
@@ -178,18 +178,69 @@ static ssize_t readline_into_buffer(FILE *stream, dna_t **in_buffer,
     return size;
 }
 
+#ifndef NDEBUG
+/// readline_into_buffer_str: read a line (with exponentially larger buffer
+/// size), comming from an initial buffer; store the original string
+///
+/// @param stream          (in)     : stream to read
+///
+/// @param str             (in, out): not NULL
+///
+/// @param buffer          (in, out): not NULL
+///
+/// @param buffer_capacity (in, out): capacity of the buffer. not NULL
+///
+/// @return     number of characters read (excluding null byte);
+///
+static ssize_t readline_into_buffer_str(FILE *stream, char **in_str,
+                                        dna_t **in_buffer,
+                                        ssize_t *in_buffer_capacity) {
+    char *str = *in_str;
+    dna_t *buffer = *in_buffer;
+    ssize_t capacity = *in_buffer_capacity;
+
+    ssize_t size = 0;
+    int32_t ch = fgetc(stream);
+    while (ch != '\n' && ch != EOF) {
+        if (size == capacity - 1) {
+            capacity *= 2;
+            str = xrealloc(buffer, (size_t)capacity * sizeof(char));
+            buffer = xrealloc(buffer, (size_t)capacity * sizeof(dna_t));
+        }
+
+        str[size] = (char)ch;
+        buffer[size++] = char_to_dna(ch);
+        ch = fgetc(stream);
+    }
+
+    *in_str = str;
+    *in_buffer = buffer;
+    *in_buffer_capacity = capacity;
+    return size;
+}
+#endif  // NDEBUG
+
 /// pattern type
 ///
 typedef struct {
     dna_t *p_pat;
+#ifndef NDEBUG
+    char *p_str;
+#endif  // NDEBUG
     ssize_t p_size;
     ssize_t p_capacity;
 } pattern_t;
 
 static int pattern_create(pattern_t *pat, FILE *stream) {
-    pat->p_capacity = PATTERN_SIZE * sizeof(dna_t);
-    pat->p_pat = xmalloc((size_t)pat->p_capacity);
+    pat->p_capacity = PATTERN_SIZE;
+    pat->p_pat = xmalloc((size_t)pat->p_capacity * sizeof(dna_t));
+#ifdef NDEBUG
     pat->p_size = readline_into_buffer(stream, &pat->p_pat, &pat->p_capacity);
+#else
+    pat->p_str = xmalloc((size_t)pat->p_capacity * sizeof(char));
+    pat->p_size = readline_into_buffer_str(stream, &pat->p_str, &pat->p_pat,
+                                           &pat->p_capacity);
+#endif  // NDEBUG
 
     return 0;
 }
@@ -197,7 +248,12 @@ static int pattern_create(pattern_t *pat, FILE *stream) {
 // reuse a pattern; throws away precomputed values but lets salvages the buffer
 // the pattern must be constructed
 static int pattern_reuse(pattern_t *pat, FILE *stream) {
+#ifdef NDEBUG
     pat->p_size = readline_into_buffer(stream, &pat->p_pat, &pat->p_capacity);
+#else
+    pat->p_size = readline_into_buffer_str(stream, &pat->p_str, &pat->p_pat,
+                                           &pat->p_capacity);
+#endif  // NDEBUG
     return 0;
 }
 
@@ -206,7 +262,14 @@ static int pattern_delete(pattern_t *pat) {
         free(pat->p_pat);
         pat->p_pat = NULL;
     }
+#ifndef NDEBUG
+    if (pat->p_str != NULL) {
+        free(pat->p_str);
+        pat->p_str = NULL;
+    }
+#endif  // NDEBUG
     pat->p_size = 0;
+    pat->p_capacity = 0;
 
     return 0;
 }
@@ -302,15 +365,24 @@ static int pattern_good_suffix(pattern_t const *pat, ssize_t const *preffix,
 ///
 typedef struct {
     dna_t *t_text;
+#ifndef NDEBUG
+    char *t_str;
+#endif  // NDEBUG
     ssize_t t_size;
     ssize_t t_capacity;
 } text_t;
 
 static int text_create(text_t *text, FILE *stream) {
-    text->t_capacity = TEXT_SIZE * sizeof(dna_t);
-    text->t_text = xmalloc((size_t)text->t_capacity);
+    text->t_capacity = TEXT_SIZE;
+    text->t_text = xmalloc((size_t)text->t_capacity * sizeof(dna_t));
+#ifdef NDEBUG
     text->t_size =
         readline_into_buffer(stream, &text->t_text, &text->t_capacity);
+#else
+    text->t_str = xmalloc((size_t)text->t_capacity * sizeof(char));
+    text->t_size = readline_into_buffer_str(stream, &text->t_str, &text->t_text,
+                                            &text->t_capacity);
+#endif  // NDEBUG
 
     return 0;
 }
@@ -318,8 +390,13 @@ static int text_create(text_t *text, FILE *stream) {
 // reuse a text; throws away precomputed values but lets salvages the buffer
 // the text must be constructed already constructed
 static int text_reuse(text_t *text, FILE *stream) {
+#ifdef NDEBUG
     text->t_size =
         readline_into_buffer(stream, &text->t_text, &text->t_capacity);
+#else
+    text->t_size = readline_into_buffer_str(stream, &text->t_str, &text->t_text,
+                                            &text->t_capacity);
+#endif  // NDEBUG
     return 0;
 }
 
@@ -328,7 +405,14 @@ static int text_delete(text_t *text) {
         free(text->t_text);
         text->t_text = NULL;
     }
+#ifndef NDEBUG
+    if (text->t_str != NULL) {
+        free(text->t_str);
+        text->t_str = NULL;
+    }
+#endif  // NDEBUG
     text->t_size = 0;
+    text->t_capacity = 0;
 
     return 0;
 }
@@ -370,31 +454,39 @@ static void kmp(text_t const *text, pattern_t const *pat) {
     ssize_t q = 0;
     ssize_t comparisons = 0;
 
+    LOG("KMP:\nt| %.*s\t [size = %zd]\np| %.*s\t [size = %zd]\n",
+        (int)text->t_size, text->t_str, text->t_size, (int)pat->p_size,
+        pat->p_str, pat->p_size);
+
     // the guard should be (i + (pat->p_size - 1) < text->t_size)
     //
     for (ssize_t i = 0; i < text->t_size; ++i) {
-        // this is just `while (q > 0 && pat->p_pat[q] != text->t_text[i])`
-        // the unfolding is done to accurately count comparisons
-        //
-        while (q > 0) {
+        LOG("checking [%zd]:\nt| %.*s\np| %.*s\n", i,
+            (int)min_i64(i, pat->p_size),
+            text->t_str + max_i64(0, i + 1 - pat->p_size),
+            (int)min_i64(i, pat->p_size), pat->p_str);
+        while (q > 0 && pat->p_pat[q] != text->t_text[i]) {
             comparisons++;
-            if (pat->p_pat[q] == text->t_text[i]) {
-                break;
-            }
+            LOG("comparisons++: %zd", comparisons);
             q = preffix[q];  // NOLINT : pattern_preffix makes sure that this is
                              // not garbage
         }
 
-        comparisons++;
+        comparisons++;  // this next comparison
+        LOG("comparisons++: %zd", comparisons);
         if (pat->p_pat[q] == text->t_text[i]) {
             q++;
         }
 
         if (q == pat->p_size) {
+            LOG("success  [%zd]", i + 1 - pat->p_size);
             fprintf(stdout, "%zd ", i + 1 - pat->p_size);
+            comparisons++;
+            LOG("comparisons++: %zd", comparisons);
             q = preffix[q - 1];  // NOLINT : pattern_preffix makes sure that
                                  // this is not garbage
         }
+        fprintf(stderr, "----------------------\n");
     }
 
     fprintf(stdout, "\n%zd \n", comparisons);
@@ -424,7 +516,10 @@ static void bm(text_t const *text, pattern_t const *pat) {
             assert(gamma[pat->p_size] > 0, "need non 0 increment");
             i += gamma[pat->p_size];
         } else {
-            assert(max_i64(gamma[comp], comp - lambda[dna_to_int(text->t_text[i + comp])]) > 0, "need non 0 increment");
+            assert(
+                max_i64(gamma[comp],
+                        comp - lambda[dna_to_int(text->t_text[i + comp])]) > 0,
+                "need non 0 increment");
             i += max_i64(gamma[comp],
                          comp - lambda[dna_to_int(text->t_text[i + comp])]);
         }
