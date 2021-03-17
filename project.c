@@ -510,13 +510,19 @@ static void bm(text_t const *text, pattern_t const *pat) {
     ssize_t *gamma = xmalloc(pattern_good_suffix_size(pat) * sizeof(ssize_t));
     pattern_good_suffix(pat, preffix, gamma);
 
+    LOG("BM:\nt| %.*s\t [size = %zd]\np| %.*s\t [size = %zd]\n",
+        (int)text->t_size, text->t_str, text->t_size, (int)pat->p_size,
+        pat->p_str, pat->p_size);
+
     for (ssize_t i = 0; i + (pat->p_size - 1) < text->t_size;) {
         ssize_t comp = text_compare_pattern(text, pat, i);
         comparisons += (comp == pat->p_size ? comp : (pat->p_size - comp));
+        LOG("comparisons++: %zd", comparisons);
         if (comp == pat->p_size) {
             fprintf(stdout, "%zd ", i);
             assert(gamma[pat->p_size] > 0, "need non 0 increment");
             i += gamma[pat->p_size];
+            LOG("Success!! moved using gamma %zd", gamma[pat->p_size]);
         } else {
             assert(
                 max_i64(gamma[comp],
@@ -524,6 +530,16 @@ static void bm(text_t const *text, pattern_t const *pat) {
                 "need non 0 increment");
             i += max_i64(gamma[comp],
                          comp - lambda[dna_to_int(text->t_text[i + comp])]);
+            if ( gamma[comp] > comp - lambda[dna_to_int(text->t_text[i + comp])] ) {
+                LOG("moved using GAMMA %zd", gamma[comp]);
+
+            } else if ( gamma[comp] == comp - lambda[dna_to_int(text->t_text[i + comp])] ) {
+                LOG("moved using BOTH %zd", gamma[comp]);
+
+            } else {
+                LOG("moved using LAMBDA %zd", comp - lambda[dna_to_int(text->t_text[i + comp])]);
+
+            }
         }
     }
 
