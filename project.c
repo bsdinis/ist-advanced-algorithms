@@ -612,4 +612,6 @@ int main() {
     if (pattern_created) {
         pattern_delete(&pat);
     }
+
+    return 0;
 }
