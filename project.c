@@ -514,6 +514,21 @@ static void bm(text_t const *text, pattern_t const *pat) {
         (int)text->t_size, text->t_str, text->t_size, (int)pat->p_size,
         pat->p_str, pat->p_size);
 
+    LOG("Lambda");
+    for (size_t i = 0; i < DNA_SIGMA_SIZE; i++)
+        fprintf(stderr, " %zd", lambda[i]);
+    fprintf(stderr, "\n");
+
+    LOG("Prefix");
+    for (size_t i = 0; i < pattern_preffix_size(pat); i++)
+        fprintf(stderr, " %zd", preffix[i]);
+    fprintf(stderr, "\n");
+
+    LOG("Gamma");
+    for (size_t i = 0; i < pattern_good_suffix_size(pat); i++)
+        fprintf(stderr, " %zd", gamma[i]);
+    fprintf(stderr, "\n");
+
     for (ssize_t i = 0; i + (pat->p_size - 1) < text->t_size;) {
         ssize_t comp = text_compare_pattern(text, pat, i);
         comparisons += (comp == pat->p_size ? comp : (pat->p_size - comp));
@@ -522,7 +537,7 @@ static void bm(text_t const *text, pattern_t const *pat) {
             fprintf(stdout, "%zd ", i);
             assert(gamma[pat->p_size] > 0, "need non 0 increment");
             i += gamma[pat->p_size];
-            LOG("Success!! moved using gamma %zd", gamma[pat->p_size]);
+            LOG("Success!! moved using gamma %zd,  gammaindex %zd", gamma[pat->p_size], pat->p_size);
         } else {
             assert(
                 max_i64(gamma[comp],
@@ -531,10 +546,10 @@ static void bm(text_t const *text, pattern_t const *pat) {
             i += max_i64(gamma[comp],
                          comp - lambda[dna_to_int(text->t_text[i + comp])]);
             if ( gamma[comp] > comp - lambda[dna_to_int(text->t_text[i + comp])] ) {
-                LOG("moved using GAMMA %zd", gamma[comp]);
+                LOG("moved using GAMMA %zd,  gammaindex %zd", gamma[comp], comp);
 
             } else if ( gamma[comp] == comp - lambda[dna_to_int(text->t_text[i + comp])] ) {
-                LOG("moved using BOTH %zd", gamma[comp]);
+                LOG("moved using BOTH %zd,  gammaindex %zd", gamma[comp], comp);
 
             } else {
                 LOG("moved using LAMBDA %zd", comp - lambda[dna_to_int(text->t_text[i + comp])]);
