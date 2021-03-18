@@ -324,7 +324,7 @@ static int pattern_reverse_preffix(pattern_t const *pat, ssize_t *preffix) {
 static inline int pattern_last_occurrence(pattern_t const *pat,
                                           ssize_t *lambda) {
     for (ssize_t i = 0; i < DNA_SIGMA_SIZE; i++) {
-        lambda[i] = 0;
+        lambda[i] = -1;
     }
 
     for (ssize_t i = 0; i < pat->p_size; ++i) {
@@ -543,8 +543,6 @@ static void bm(text_t const *text, pattern_t const *pat) {
                 max_i64(gamma[comp],
                         comp - lambda[dna_to_int(text->t_text[i + comp])]) > 0,
                 "need non 0 increment");
-            i += max_i64(gamma[comp],
-                         comp - lambda[dna_to_int(text->t_text[i + comp])]);
             if ( gamma[comp] > comp - lambda[dna_to_int(text->t_text[i + comp])] ) {
                 LOG("moved using GAMMA %zd,  gammaindex %zd", gamma[comp], comp);
 
@@ -555,6 +553,8 @@ static void bm(text_t const *text, pattern_t const *pat) {
                 LOG("moved using LAMBDA %zd", comp - lambda[dna_to_int(text->t_text[i + comp])]);
 
             }
+            i += max_i64(gamma[comp],
+                         comp - lambda[dna_to_int(text->t_text[i + comp])]);
         }
     }
 
