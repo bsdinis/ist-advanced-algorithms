@@ -8,7 +8,7 @@ TEXT_SIZE = (30, 10000)
 PATTERN_SIZE = (3, 1000)
 NTEXTS = 50
 NPATTERNS = 500
-ALGORITHMS = ['N', 'K', 'B']
+ALGORITHMS = [ 'K', 'B']
 ALPHABET = ['A', 'T', 'G', 'C']
 
 

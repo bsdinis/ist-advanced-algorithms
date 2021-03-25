@@ -73,7 +73,7 @@ static inline int64_t max_i64(int64_t const a, int64_t const b) {
 /* checked malloc
  */
 static void *_priv_xmalloc(char const *file, int lineno, size_t size) {
-    void *ptr = malloc(size);
+    void *ptr = malloc(size); /* NOLINT */
     if (ptr == NULL && size != 0) {
         fprintf(stderr, "[ERROR] %s:%d | xmalloc failed: %s\n", file, lineno,
                 strerror(errno));
