@@ -212,7 +212,7 @@ static ssize_t readline_into_buffer_str(FILE *stream, char **in_str,
     while (ch != '\n' && ch != EOF) {
         if (size == capacity - 1) {
             capacity *= 2;
-            str = xrealloc(buffer, (size_t)capacity * sizeof(char));
+            str = xrealloc(str, (size_t)(capacity+1) * sizeof(char));
             buffer = xrealloc(buffer, (size_t)capacity * sizeof(dna_t));
         }
 
@@ -221,6 +221,7 @@ static ssize_t readline_into_buffer_str(FILE *stream, char **in_str,
         ch = fgetc(stream);
     }
 
+    str[size] = 0;
     *in_str = str;
     *in_buffer = buffer;
     *in_buffer_capacity = capacity;
@@ -245,7 +246,7 @@ static int pattern_create(pattern_t *pat, FILE *stream) {
 #ifdef NDEBUG
     pat->p_size = readline_into_buffer(stream, &pat->p_pat, &pat->p_capacity);
 #else
-    pat->p_str = xmalloc((size_t)pat->p_capacity * sizeof(char));
+    pat->p_str = xmalloc((size_t)(pat->p_capacity+1)* sizeof(char));
     pat->p_size = readline_into_buffer_str(stream, &pat->p_str, &pat->p_pat,
                                            &pat->p_capacity);
 #endif  /* NDEBUG */
@@ -392,7 +393,7 @@ static int text_create(text_t *text, FILE *stream) {
     text->t_size =
         readline_into_buffer(stream, &text->t_text, &text->t_capacity);
 #else
-    text->t_str = xmalloc((size_t)text->t_capacity * sizeof(char));
+    text->t_str = xmalloc((size_t)(text->t_capacity + 1) * sizeof(char));
     text->t_size = readline_into_buffer_str(stream, &text->t_str, &text->t_text,
                                             &text->t_capacity);
 #endif  /* NDEBUG */
