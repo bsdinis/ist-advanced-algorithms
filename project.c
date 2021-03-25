@@ -331,17 +331,17 @@ static int pattern_reverse_preffix(pattern_t const *pat, ssize_t *preffix) {
     return 0;
 }
 
-/* assumption: lambda has the size of the alphabet
+/* assumption: last_occur has the size of the alphabet
  */
-static inline int pattern_last_occurrence(pattern_t const *pat,
-                                          ssize_t *lambda) {
+static inline int pattern_bad_character(pattern_t const *pat,
+                                          ssize_t *last_occur) {
     ssize_t i;
     for (i = 0; i < DNA_SIGMA_SIZE; i++) {
-        lambda[i] = -1;
+        last_occur[i] = -1;
     }
 
     for (i = 0; i < pat->p_size; ++i) {
-        lambda[dna_to_int(pat->p_pat[i])] = i;
+        last_occur[dna_to_int(pat->p_pat[i])] = i;
     }
 
     return 0;
@@ -350,23 +350,50 @@ static inline int pattern_last_occurrence(pattern_t const *pat,
 static inline size_t pattern_good_suffix_size(pattern_t const *pat) {
     return (size_t)pat->p_size + 1;
 }
-/* assumption: good_suffix has size (pat->p_size + 1)
+
+/* assumption: good_suf_shift has size (pat->p_size + 1)
+ *
+ * good_suf_shift[i] represents the shift when the mismatch ocurred at index i
+ * (of the pattern). If the mismatch ocurred at position -1 (ie, there was no mismatch)
+ * the shift is at good_suf_shift[pat->p_size].
+ *
+ * Suppose
+ * for a given alignment of P and T, a substring t of T matches a suffix of P,
+ * but a mismatch occurs at the next comparison to the left.
+ *
+ * Then find, if it exists, the rightmost copy t' of t in P
+ * such that t' is not a suffix of P and the character to the left of t' in P
+ * differs from the character to the left of t in P.
+ *
+ * Shift P to the right so that substring t' in P is below substring t in T.
+ *
+ * If t' does not exist, then shift the left end of P past the left end of t in T
+ * by the least amount so that a prefix of the shifted pattern matches a suffix of t in T.
+ * If no such shift is possible, then shift P by n places to the right.
+ *
+ * If an occurrence of P is found, then shift P by the least amount so that a proper
+ * prefix of the shifted P matches a suffix of the occurrence of P in T.
+ *
+ * If no such shift is possible, then shift P by n places, that is, shift P past t in T
+ * This heuristic has 4 cases:
+ *   - A:
+ *
  */
 static int pattern_good_suffix(pattern_t const *pat, ssize_t const *preffix,
-                               ssize_t *gamma) {
+                               ssize_t *good_suf_shift) {
     ssize_t i;
     ssize_t *reverse_preffix =
         xmalloc(pattern_preffix_size(pat) * sizeof(ssize_t));
     pattern_reverse_preffix(pat, reverse_preffix);
 
     for (i = 0; i < pat->p_size + 1; ++i) {
-        gamma[i] = pat->p_size - preffix[pat->p_size - 1];
+        good_suf_shift[i] = pat->p_size - preffix[pat->p_size - 1];
     }
 
-    for (i = 1; i < pat->p_size; ++i) {
+    for (i = 0; i < pat->p_size; ++i) {
         ssize_t const j = pat->p_size - 1 - reverse_preffix[i];
-        gamma[j] = min_i64(gamma[j], i - reverse_preffix[i]);
-        assert(gamma[j] >= 0, "suffix needs to be nonnegative");
+        good_suf_shift[j] = min_i64(good_suf_shift[j], i - reverse_preffix[i]);
+        assert(good_suf_shift[j] >= 0, "suffix needs to be nonnegative");
     }
 
     free(reverse_preffix);
@@ -470,7 +497,7 @@ static void naive(text_t const *text, pattern_t const *pat) {
  */
 static void kmp(text_t const *text, pattern_t const *pat) {
     ssize_t *preffix = NULL;
-    ssize_t q = 0;
+    ssize_t q = -1;
     ssize_t comparisons = 0;
     ssize_t i;
 
@@ -481,22 +508,22 @@ static void kmp(text_t const *text, pattern_t const *pat) {
     pattern_preffix(pat, preffix);
 
     for (i = 0; i < text->t_size; ++i) {
-        while (q > 0 && pat->p_pat[q] != text->t_text[i]) {
+        while (q >= 0 && pat->p_pat[q + 1] != text->t_text[i]) {
             comparisons++;
-            q = preffix[q];  /* NOLINT : pattern_preffix makes sure that this is
+            q = preffix[q] - 1;  /* NOLINT : pattern_preffix makes sure that this is
                               * not garbage */
         }
 
         comparisons++;  /* this next comparison */
-        if (pat->p_pat[q] == text->t_text[i]) {
+        if (pat->p_pat[q + 1] == text->t_text[i]) {
             q++;
         }
 
-        if (q == pat->p_size) {
+        if (q + 1 == pat->p_size) {
             fprintf(stdout, "%zd ", i + 1 - pat->p_size);
-            if (i < text->t_size-1) { /* Is it really this if?? Why not... */
+            if (i < text->t_size-1) {
                 comparisons++;
-                q = preffix[q - 1];  /* NOLINT : pattern_preffix makes sure that */
+                q = preffix[q] - 1;  /* NOLINT : pattern_preffix makes sure that */
             }
         }
     }
@@ -512,35 +539,43 @@ static void bm(text_t const *text, pattern_t const *pat) {
     ssize_t comparisons = 0;
     ssize_t i;
 
-    ssize_t lambda[DNA_SIGMA_SIZE];
+    ssize_t last_occur[DNA_SIGMA_SIZE];
     ssize_t *preffix = xmalloc(pattern_preffix_size(pat) * sizeof(ssize_t));
-    ssize_t *gamma = xmalloc(pattern_good_suffix_size(pat) * sizeof(ssize_t));
+    ssize_t *good_suf_shift = xmalloc(pattern_good_suffix_size(pat) * sizeof(ssize_t));
 
     assert(text->t_size > 0, "empty text not allowed");
     assert(pat->p_size > 0, "empty pattern not allowed");
 
-    pattern_last_occurrence(pat, lambda);
+    pattern_bad_character(pat, last_occur);
     pattern_preffix(pat, preffix);
-    pattern_good_suffix(pat, preffix, gamma);
+    pattern_good_suffix(pat, preffix, good_suf_shift);
 
     for (i = 0; i + (pat->p_size - 1) < text->t_size;) {
         ssize_t comp = text_compare_pattern(text, pat, i);
         comparisons += (comp == pat->p_size ? comp : (pat->p_size - comp));
         if (comp == pat->p_size) {
             fprintf(stdout, "%zd ", i);
-            assert(gamma[pat->p_size] > 0, "need non 0 increment");
-            i += gamma[pat->p_size];
+            assert(good_suf_shift[pat->p_size] > 0, "need non 0 increment");
+            i += good_suf_shift[pat->p_size];
         } else {
-            assert( max_i64(gamma[comp], comp - lambda[dna_to_int(text->t_text[i + comp])]) > 0,
-                "need non 0 increment");
-            i += max_i64(gamma[comp],
-                         comp - lambda[dna_to_int(text->t_text[i + comp])]);
+            ssize_t bad_char_shift = comp - last_occur[dna_to_int(text->t_text[i + comp])];
+            /*
+            if (bad_char_shift > good_suf_shift[comp]) {
+                LOG("bad char: %zd", i);
+            } else if (bad_char_shift == good_suf_shift[comp]) {
+                LOG("both: %zd", i);
+            } else {
+                LOG("good_suf: %zd", i);
+            }
+            */
+            assert( max_i64(good_suf_shift[comp], bad_char_shift) > 0, "need non 0 increment");
+            i += max_i64(good_suf_shift[comp], bad_char_shift);
         }
     }
 
     fprintf(stdout, "\n%zd \n", comparisons);
     free(preffix);
-    free(gamma);
+    free(good_suf_shift);
 }
 
 int main() {
@@ -565,6 +600,7 @@ int main() {
                     text_create(&text, stdin);
                     text_created = true;
                 }
+                /*LOG("processing text: %s", text.t_str);*/
                 break;
             case 'N':
                 fgetc(stdin);  /* drop space */
@@ -574,6 +610,7 @@ int main() {
                     pattern_create(&pat, stdin);
                     pattern_created = true;
                 }
+                /*LOG("naive: %s", pat.p_str);*/
                 naive(&text, &pat);
                 break;
             case 'K':
@@ -584,6 +621,7 @@ int main() {
                     pattern_create(&pat, stdin);
                     pattern_created = true;
                 }
+                /*LOG("kmp:   %s", pat.p_str);*/
                 kmp(&text, &pat);
                 break;
             case 'B':
@@ -594,6 +632,7 @@ int main() {
                     pattern_create(&pat, stdin);
                     pattern_created = true;
                 }
+                /*LOG("bm:    %s", pat.p_str);*/
                 bm(&text, &pat);
                 break;
             case 'X':

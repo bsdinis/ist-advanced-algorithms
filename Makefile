@@ -1,14 +1,15 @@
-CFLAGS = -std=90 -ansi -pedantic -Wall -Wextra -Wshadow -Wcast-align -Wunused -Wpedantic -Wconversion -Wsign-conversion -Wnull-dereference -Wdouble-promotion -Werror
+CFLAGS = -ansi -pedantic -Wall -Wextra -Wshadow -Wcast-align -Wunused -Wpedantic -Wconversion -Wsign-conversion -Wnull-dereference -Wdouble-promotion -Werror -Wno-unused-value
 
+CFLAGS += -std=c18
 CFLAGS += -fsanitize=address,leak
 #CFLAGS += -fsanitize=thread
 #CFLAGS += -fsanitize=memory
 
 # debug setting
-# CFLAGS += -O0 -g
+CFLAGS += -O0 -g
 
 # perf setting
-CFLAGS += -O3 -flto # -DNDEBUG
+#CFLAGS += -O3 -flto # -DNDEBUG
 
 all: project
 

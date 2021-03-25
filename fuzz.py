@@ -4,11 +4,11 @@ import random
 import sys
 import progressbar
 
-TEXT_SIZE = (30, 10000)
-PATTERN_SIZE = (3, 1000)
+TEXT_SIZE =    (30, 1000000)
+PATTERN_SIZE = (3,  10000)
 NTEXTS = 50
 NPATTERNS = 500
-ALGORITHMS = [ 'K', 'B']
+ALGORITHMS = ['K', 'B']
 ALPHABET = ['A', 'T', 'G', 'C']
 
 
