@@ -60,9 +60,6 @@
 #define ssize_t int64_t
 #endif
 
-static inline int64_t min_i64(int64_t const a, int64_t const b) {
-    return (a < b) ? a : b;
-}
 static inline int64_t max_i64(int64_t const a, int64_t const b) {
     return (a > b) ? a : b;
 }
@@ -76,6 +73,19 @@ static void *_priv_xmalloc(char const *file, int lineno, size_t size) {
     void *ptr = malloc(size); /* NOLINT */
     if (ptr == NULL && size != 0) {
         fprintf(stderr, "[ERROR] %s:%d | xmalloc failed: %s\n", file, lineno,
+                strerror(errno));
+        exit(EXIT_FAILURE);
+    }
+
+    return ptr;
+}
+
+/* checked calloc
+ */
+void *priv_xcalloc__(char const *file, int lineno, size_t nmemb, size_t size) {
+    void *ptr = calloc(nmemb, size);
+    if (ptr == NULL && size != 0) {
+        fprintf(stderr, "[ERROR] %s:%d | xcalloc failed: %s\n", file, lineno,
                 strerror(errno));
         exit(EXIT_FAILURE);
     }
@@ -97,6 +107,7 @@ static void *_priv_xrealloc(char const *file, int lineno, void *ptr, size_t size
 }
 
 #define xmalloc(size) _priv_xmalloc(__FILE__, __LINE__, size)
+#define xcalloc(nmemb, size) priv_xcalloc__(__FILE__, __LINE__, nmemb, size)
 #define xrealloc(ptr, size) _priv_xrealloc(__FILE__, __LINE__, ptr, size)
 
 /* we define a better assert than that from the stdilb
@@ -308,28 +319,6 @@ static int pattern_preffix(pattern_t const *pat, ssize_t *preffix) {
     return 0;
 }
 
-/* assumption: preffix must has pat->p_size els
- */
-static int pattern_reverse_preffix(pattern_t const *pat, ssize_t *preffix) {
-    ssize_t k = 0;
-    ssize_t q;
-
-    preffix[0] = 0;
-    for (q = 1; q < pat->p_size; ++q) {
-        while (k > 0 && pat->p_pat[pat->p_size - 1 - k] !=
-                            pat->p_pat[pat->p_size - 1 - q]) {
-            k = preffix[k - 1];
-        }
-
-        if (pat->p_pat[pat->p_size - 1 - k] ==
-            pat->p_pat[pat->p_size - 1 - q]) {
-            ++k;
-        }
-
-        preffix[q] = k;
-    }
-    return 0;
-}
 
 /* assumption: last_occur has the size of the alphabet
  */
@@ -347,56 +336,59 @@ static inline int pattern_bad_character(pattern_t const *pat,
     return 0;
 }
 
-static inline size_t pattern_good_suffix_size(pattern_t const *pat) {
-    return (size_t)pat->p_size + 1;
-}
 
-/* assumption: good_suf_shift has size (pat->p_size + 1)
- *
- * good_suf_shift[i] represents the shift when the mismatch ocurred at index i
- * (of the pattern). If the mismatch ocurred at position -1 (ie, there was no mismatch)
- * the shift is at good_suf_shift[pat->p_size].
- *
- * Suppose
- * for a given alignment of P and T, a substring t of T matches a suffix of P,
- * but a mismatch occurs at the next comparison to the left.
- *
- * Then find, if it exists, the rightmost copy t' of t in P
- * such that t' is not a suffix of P and the character to the left of t' in P
- * differs from the character to the left of t in P.
- *
- * Shift P to the right so that substring t' in P is below substring t in T.
- *
- * If t' does not exist, then shift the left end of P past the left end of t in T
- * by the least amount so that a prefix of the shifted pattern matches a suffix of t in T.
- * If no such shift is possible, then shift P by n places to the right.
- *
- * If an occurrence of P is found, then shift P by the least amount so that a proper
- * prefix of the shifted P matches a suffix of the occurrence of P in T.
- *
- * If no such shift is possible, then shift P by n places, that is, shift P past t in T
- * This heuristic has 4 cases:
- *   - A:
- *
+/**
+ * Compute shift array for Boyer-Moore
+ * Assumes the shift array has p_size + 1 elements, initialized at 0
  */
-static int pattern_good_suffix(pattern_t const *pat, ssize_t const *preffix,
-                               ssize_t *good_suf_shift) {
-    ssize_t i;
-    ssize_t *reverse_preffix =
-        xmalloc(pattern_preffix_size(pat) * sizeof(ssize_t));
-    pattern_reverse_preffix(pat, reverse_preffix);
+static int pattern_good_suffix(pattern_t const *pat, ssize_t * shifts) {
 
-    for (i = 0; i < pat->p_size + 1; ++i) {
-        good_suf_shift[i] = pat->p_size - preffix[pat->p_size - 1];
+    /* A border is a substring which is simultaneously a proper suffix and a proper
+     * preffix.
+     *
+     * Given i, border_pos is the starting position of the proper suffix of P[i..]
+     * (note: this is a suffix of a suffix) which defines the widest border.
+     *
+     * If there is no border, the empty string is the border, so border_pos = len(P)
+     */
+    ssize_t * border_pos = xcalloc((size_t)pat->p_size + 1, sizeof (ssize_t));
+    ssize_t i = pat->p_size;
+    ssize_t j = pat->p_size + 1;
+
+    border_pos[i] = j;
+
+    /* Construct the border positions
+     * If at somepoint we cannot extend a border to the left
+     * (we are inside the inner loop) and
+     * there is no shift, shift by that ammount.
+     */
+    while (i > 0) {
+        while (j < pat->p_size + 1 && pat->p_pat[i - 1] != pat->p_pat[j - 1]) {
+            if (shifts[j] == 0) {
+                shifts[j] = j - i;
+            }
+
+            j = border_pos[j];
+        }
+
+        i--;
+        j--;
+        border_pos[i] = j;
     }
 
-    for (i = 0; i < pat->p_size; ++i) {
-        ssize_t const j = pat->p_size - 1 - reverse_preffix[i];
-        good_suf_shift[j] = min_i64(good_suf_shift[j], i - reverse_preffix[i]);
-        assert(good_suf_shift[j] >= 0, "suffix needs to be nonnegative");
+    i = 0;
+    j = border_pos[0];
+    for (; i < pat->p_size + 1; ++i) {
+        if (shifts[i] == 0) {
+            shifts[i] = j;
+        }
+
+        if (i == j) {
+            j = border_pos[j];
+        }
     }
 
-    free(reverse_preffix);
+    free(border_pos);
     return 0;
 }
 
@@ -537,49 +529,39 @@ static void kmp(text_t const *text, pattern_t const *pat) {
  */
 static void bm(text_t const *text, pattern_t const *pat) {
     ssize_t comparisons = 0;
-    ssize_t i;
+    ssize_t i = 0;
 
     ssize_t last_occur[DNA_SIGMA_SIZE];
-    ssize_t *preffix = xmalloc(pattern_preffix_size(pat) * sizeof(ssize_t));
-    ssize_t *good_suf_shift = xmalloc(pattern_good_suffix_size(pat) * sizeof(ssize_t));
+    ssize_t *shifts = xcalloc((size_t)pat->p_size + 1, sizeof(ssize_t));
 
     assert(text->t_size > 0, "empty text not allowed");
     assert(pat->p_size > 0, "empty pattern not allowed");
 
     pattern_bad_character(pat, last_occur);
-    pattern_preffix(pat, preffix);
-    pattern_good_suffix(pat, preffix, good_suf_shift);
+    pattern_good_suffix(pat, shifts);
 
-    for (i = 0; i + (pat->p_size - 1) < text->t_size;) {
-        ssize_t comp = text_compare_pattern(text, pat, i);
-        comparisons += (comp == pat->p_size ? comp : (pat->p_size - comp));
-        if (comp == pat->p_size) {
+    while (i <= text->t_size - pat->p_size) {
+        ssize_t j = pat->p_size - 1;
+        while (j >= 0 && pat->p_pat[j] == text->t_text[i + j]) {
+            comparisons++;
+            j--;
+        }
+
+        if (j < 0) {
             fprintf(stdout, "%zd ", i);
-            assert(good_suf_shift[pat->p_size] > 0, "need non 0 increment");
-            i += good_suf_shift[pat->p_size];
+            i += shifts[0];
         } else {
-            ssize_t bad_char_shift = comp - last_occur[dna_to_int(text->t_text[i + comp])];
-            /*
-            if (bad_char_shift > good_suf_shift[comp]) {
-                LOG("bad char: %zd", i);
-            } else if (bad_char_shift == good_suf_shift[comp]) {
-                LOG("both: %zd", i);
-            } else {
-                LOG("good_suf: %zd", i);
-            }
-            */
-            assert( max_i64(good_suf_shift[comp], bad_char_shift) > 0, "need non 0 increment");
-            i += max_i64(good_suf_shift[comp], bad_char_shift);
+            i += max_i64(shifts[j + 1], j - last_occur[dna_to_int(text->t_text[i + j])]);
+            comparisons++;
         }
     }
 
     fprintf(stdout, "\n%zd \n", comparisons);
-    free(preffix);
-    free(good_suf_shift);
+    free(shifts);
 }
 
 int main() {
-    int ch;
+    int ch = 0;;
     text_t text;
     bool text_created = false;
 

@@ -4,11 +4,12 @@ import random
 import sys
 import progressbar
 
-TEXT_SIZE =    (30, 1000000)
-PATTERN_SIZE = (3,  10000)
+TEXT_SIZE =    (30, 1000)
+PATTERN_SIZE = (3,  100)
 NTEXTS = 50
 NPATTERNS = 500
-ALGORITHMS = ['K', 'B']
+ALGORITHMS = ['B']
+#ALGORITHMS = ['K', 'B']
 ALPHABET = ['A', 'T', 'G', 'C']
 
 
@@ -23,9 +24,11 @@ def gen_pattern():
 
 
 if __name__ == '__main__':
-    for t in progressbar.progressbar(range(NTEXTS)):
-        print(gen_text())
-        for p in progressbar.progressbar(range(NPATTERNS)):
-            print(gen_pattern())
+    #for t in progressbar.progressbar(range(NTEXTS)):
+        #print(gen_text())
+        #for p in progressbar.progressbar(range(NPATTERNS)):
+            #print(gen_pattern())
 
+    print(gen_text())
+    print(gen_pattern())
     print('X')
