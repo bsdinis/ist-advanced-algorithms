@@ -15,7 +15,8 @@
 #define WEIRD_OLD_C_OMG_WHY_DO_U_DO_DIS_2_US
 #endif
 
-#define KILL(a, b) { __builtin_unreachable(); }
+#define KILL(a, b) \
+    { __builtin_unreachable(); }
 #define WARN(a, b)
 #define LOG
 
@@ -95,7 +96,8 @@ void *priv_xcalloc__(char const *file, int lineno, size_t nmemb, size_t size) {
 
 /* checked realloc
  */
-static void *_priv_xrealloc(char const *file, int lineno, void *ptr, size_t size) {
+static void *_priv_xrealloc(char const *file, int lineno, void *ptr,
+                            size_t size) {
     void *new_ptr = realloc(ptr, size);
     if (size != 0 && new_ptr == NULL && ptr != NULL) {
         fprintf(stderr, "[ERROR] %s:%d | xrealloc failed: %s\n", file, lineno,
@@ -116,7 +118,7 @@ static void *_priv_xrealloc(char const *file, int lineno, void *ptr, size_t size
 #define assert(pred, msg)                                                 \
     if (!(pred)) {                                                        \
         fprintf(stderr, "[ASSERT] %s:%d | %s | %s\n", __FILE__, __LINE__, \
-                #pred, msg);                                      \
+                #pred, msg);                                              \
         exit(EXIT_FAILURE);                                               \
     }
 #else
@@ -124,12 +126,12 @@ static void *_priv_xrealloc(char const *file, int lineno, void *ptr, size_t size
     if (!(pred)) {               \
         __builtin_unreachable(); \
     }
-#endif  /* NDEBUG */
+#endif /* NDEBUG */
 
 /* dna_t
  */
 typedef enum { DNA_A, DNA_C, DNA_T, DNA_G } dna_t;
-#define DNA_SIGMA_SIZE (4)  /* size of the alphabet */
+#define DNA_SIGMA_SIZE (4) /* size of the alphabet */
 
 /* conversion functions
  */
@@ -223,7 +225,7 @@ static ssize_t readline_into_buffer_str(FILE *stream, char **in_str,
     while (ch != '\n' && ch != EOF) {
         if (size == capacity - 1) {
             capacity *= 2;
-            str = xrealloc(str, (size_t)(capacity+1) * sizeof(char));
+            str = xrealloc(str, (size_t)(capacity + 1) * sizeof(char));
             buffer = xrealloc(buffer, (size_t)capacity * sizeof(dna_t));
         }
 
@@ -238,7 +240,7 @@ static ssize_t readline_into_buffer_str(FILE *stream, char **in_str,
     *in_buffer_capacity = capacity;
     return size;
 }
-#endif  /* NDEBUG */
+#endif /* NDEBUG */
 
 /*  pattern type
  */
@@ -246,7 +248,7 @@ typedef struct {
     dna_t *p_pat;
 #ifndef NDEBUG
     char *p_str;
-#endif  /* NDEBUG */
+#endif /* NDEBUG */
     ssize_t p_size;
     ssize_t p_capacity;
 } pattern_t;
@@ -257,16 +259,16 @@ static int pattern_create(pattern_t *pat, FILE *stream) {
 #ifdef NDEBUG
     pat->p_size = readline_into_buffer(stream, &pat->p_pat, &pat->p_capacity);
 #else
-    pat->p_str = xmalloc((size_t)(pat->p_capacity+1)* sizeof(char));
+    pat->p_str = xmalloc((size_t)(pat->p_capacity + 1) * sizeof(char));
     pat->p_size = readline_into_buffer_str(stream, &pat->p_str, &pat->p_pat,
                                            &pat->p_capacity);
-#endif  /* NDEBUG */
+#endif /* NDEBUG */
 
     return 0;
 }
 
-/* reuse a pattern; throws away precomputed values but lets salvages the buffer
- * the pattern must be constructed
+/* reuse a pattern; throws away precomputed values but salvages the buffer
+ * the pattern must be already `create`d
  */
 static int pattern_reuse(pattern_t *pat, FILE *stream) {
 #ifdef NDEBUG
@@ -274,7 +276,7 @@ static int pattern_reuse(pattern_t *pat, FILE *stream) {
 #else
     pat->p_size = readline_into_buffer_str(stream, &pat->p_str, &pat->p_pat,
                                            &pat->p_capacity);
-#endif  /* NDEBUG */
+#endif /* NDEBUG */
     return 0;
 }
 
@@ -288,7 +290,7 @@ static int pattern_delete(pattern_t *pat) {
         free(pat->p_str);
         pat->p_str = NULL;
     }
-#endif  /* NDEBUG */
+#endif /* NDEBUG */
     pat->p_size = 0;
     pat->p_capacity = 0;
 
@@ -302,7 +304,7 @@ static inline size_t pattern_preffix_size(pattern_t const *pat) {
  */
 static int pattern_preffix(pattern_t const *pat, ssize_t *preffix) {
     ssize_t k = 0;
-    ssize_t q;
+    ssize_t q = 1;
 
     preffix[0] = 0;
     for (q = 1; q < pat->p_size; ++q) {
@@ -319,12 +321,11 @@ static int pattern_preffix(pattern_t const *pat, ssize_t *preffix) {
     return 0;
 }
 
-
-/* assumption: last_occur has the size of the alphabet
+/* Safety: last_occur has the size of (at least) |alphabet|
  */
 static inline int pattern_bad_character(pattern_t const *pat,
-                                          ssize_t *last_occur) {
-    ssize_t i;
+                                        ssize_t *last_occur) {
+    ssize_t i = 0;
     for (i = 0; i < DNA_SIGMA_SIZE; i++) {
         last_occur[i] = -1;
     }
@@ -336,22 +337,23 @@ static inline int pattern_bad_character(pattern_t const *pat,
     return 0;
 }
 
-
 /**
  * Compute shift array for Boyer-Moore
- * Assumes the shift array has p_size + 1 elements, initialized at 0
+ * Safety: `shifts` has p_size + 1 elements
+ * Correctness: `shifts` is initialized at 0
  */
-static int pattern_good_suffix(pattern_t const *pat, ssize_t * shifts) {
-
-    /* A border is a substring which is simultaneously a proper suffix and a proper
-     * preffix.
+static int pattern_good_suffix(pattern_t const *pat, ssize_t *shifts) {
+    /* A border is a substring which is simultaneously a proper suffix and a
+     * proper preffix.
      *
-     * Given i, border_pos is the starting position of the proper suffix of P[i..]
-     * (note: this is a suffix of a suffix) which defines the widest border.
+     * Given i, border_pos is the starting position of the proper suffix of
+     * P[i..] (note: this is a suffix of a suffix) which defines the widest
+     * border.
      *
-     * If there is no border, the empty string is the border, so border_pos = len(P)
+     * If there is no border, the empty string is the border, so border_pos =
+     * len(P)
      */
-    ssize_t * border_pos = xcalloc((size_t)pat->p_size + 1, sizeof (ssize_t));
+    ssize_t *border_pos = xcalloc((size_t)pat->p_size + 1, sizeof(ssize_t));
     ssize_t i = pat->p_size;
     ssize_t j = pat->p_size + 1;
 
@@ -376,9 +378,7 @@ static int pattern_good_suffix(pattern_t const *pat, ssize_t * shifts) {
         border_pos[i] = j;
     }
 
-    i = 0;
-    j = border_pos[0];
-    for (; i < pat->p_size + 1; ++i) {
+    for (i = 0, j = border_pos[0]; i < pat->p_size + 1; ++i) {
         if (shifts[i] == 0) {
             shifts[i] = j;
         }
@@ -400,7 +400,7 @@ typedef struct {
     dna_t *t_text;
 #ifndef NDEBUG
     char *t_str;
-#endif  /* NDEBUG */
+#endif /* NDEBUG */
     ssize_t t_size;
     ssize_t t_capacity;
 } text_t;
@@ -415,7 +415,7 @@ static int text_create(text_t *text, FILE *stream) {
     text->t_str = xmalloc((size_t)(text->t_capacity + 1) * sizeof(char));
     text->t_size = readline_into_buffer_str(stream, &text->t_str, &text->t_text,
                                             &text->t_capacity);
-#endif  /* NDEBUG */
+#endif /* NDEBUG */
 
     return 0;
 }
@@ -430,7 +430,7 @@ static int text_reuse(text_t *text, FILE *stream) {
 #else
     text->t_size = readline_into_buffer_str(stream, &text->t_str, &text->t_text,
                                             &text->t_capacity);
-#endif  /* NDEBUG */
+#endif /* NDEBUG */
     return 0;
 }
 
@@ -444,7 +444,7 @@ static int text_delete(text_t *text) {
         free(text->t_str);
         text->t_str = NULL;
     }
-#endif  /* NDEBUG */
+#endif /* NDEBUG */
     text->t_size = 0;
     text->t_capacity = 0;
 
@@ -502,20 +502,21 @@ static void kmp(text_t const *text, pattern_t const *pat) {
     for (i = 0; i < text->t_size; ++i) {
         while (q >= 0 && pat->p_pat[q + 1] != text->t_text[i]) {
             comparisons++;
-            q = preffix[q] - 1;  /* NOLINT : pattern_preffix makes sure that this is
-                              * not garbage */
+            q = preffix[q] - 1; /* NOLINT : pattern_preffix makes sure that this
+                                 * is not garbage */
         }
 
-        comparisons++;  /* this next comparison */
+        comparisons++; /* this next comparison */
         if (pat->p_pat[q + 1] == text->t_text[i]) {
             q++;
         }
 
         if (q + 1 == pat->p_size) {
             fprintf(stdout, "%zd ", i + 1 - pat->p_size);
-            if (i < text->t_size-1) {
+            if (i < text->t_size - 1) {
                 comparisons++;
-                q = preffix[q] - 1;  /* NOLINT : pattern_preffix makes sure that */
+                q = preffix[q] -
+                    1; /* NOLINT : pattern_preffix makes sure that */
             }
         }
     }
@@ -551,7 +552,8 @@ static void bm(text_t const *text, pattern_t const *pat) {
             fprintf(stdout, "%zd ", i);
             i += shifts[0];
         } else {
-            i += max_i64(shifts[j + 1], j - last_occur[dna_to_int(text->t_text[i + j])]);
+            i += max_i64(shifts[j + 1],
+                         j - last_occur[dna_to_int(text->t_text[i + j])]);
             comparisons++;
         }
     }
@@ -561,7 +563,8 @@ static void bm(text_t const *text, pattern_t const *pat) {
 }
 
 int main() {
-    int ch = 0;;
+    int ch = 0;
+    ;
     text_t text;
     bool text_created = false;
 
@@ -575,7 +578,7 @@ int main() {
         ch = fgetc(stdin);
         switch (ch) {
             case 'T':
-                fgetc(stdin);  /* drop space */
+                fgetc(stdin); /* drop space */
                 if (text_created) {
                     text_reuse(&text, stdin);
                 } else {
@@ -585,7 +588,7 @@ int main() {
                 /*LOG("processing text: %s", text.t_str);*/
                 break;
             case 'N':
-                fgetc(stdin);  /* drop space */
+                fgetc(stdin); /* drop space */
                 if (pattern_created) {
                     pattern_reuse(&pat, stdin);
                 } else {
@@ -596,7 +599,7 @@ int main() {
                 naive(&text, &pat);
                 break;
             case 'K':
-                fgetc(stdin);  /* drop space */
+                fgetc(stdin); /* drop space */
                 if (pattern_created) {
                     pattern_reuse(&pat, stdin);
                 } else {
@@ -607,7 +610,7 @@ int main() {
                 kmp(&text, &pat);
                 break;
             case 'B':
-                fgetc(stdin);  /* drop space */
+                fgetc(stdin); /* drop space */
                 if (pattern_created) {
                     pattern_reuse(&pat, stdin);
                 } else {
