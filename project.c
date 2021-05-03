@@ -58,9 +58,9 @@
 #define ssize_t int64_t
 #endif
 
-static inline int64_t max_i64(int64_t const a, int64_t const b) {
-    return (a > b) ? a : b;
-}
+// static inline int64_t max_i64(int64_t const a, int64_t const b) {
+//     return (a > b) ? a : b;
+// }
 
 /* util functions for memory management
  */
@@ -80,7 +80,7 @@ static void *_priv_xmalloc(char const *file, int lineno, size_t size) {
 
 /* checked calloc
  */
-void *priv_xcalloc__(char const *file, int lineno, size_t nmemb, size_t size) {
+static void *_priv_xcalloc__(char const *file, int lineno, size_t nmemb, size_t size) {
     void *ptr = calloc(nmemb, size);
     if (ptr == NULL && size != 0) {
         fprintf(stderr, "[ERROR] %s:%d | xcalloc failed: %s\n", file, lineno,
@@ -93,20 +93,20 @@ void *priv_xcalloc__(char const *file, int lineno, size_t nmemb, size_t size) {
 
 /* checked realloc
  */
-static void *_priv_xrealloc(char const *file, int lineno, void *ptr, size_t size) {
-    void *new_ptr = realloc(ptr, size);
-    if (size != 0 && new_ptr == NULL && ptr != NULL) {
-        fprintf(stderr, "[ERROR] %s:%d | xrealloc failed: %s\n", file, lineno,
-                strerror(errno));
-        exit(EXIT_FAILURE);
-    }
+// static void *_priv_xrealloc(char const *file, int lineno, void *ptr, size_t size) {
+//     void *new_ptr = realloc(ptr, size);
+//     if (size != 0 && new_ptr == NULL && ptr != NULL) {
+//         fprintf(stderr, "[ERROR] %s:%d | xrealloc failed: %s\n", file, lineno,
+//                 strerror(errno));
+//         exit(EXIT_FAILURE);
+//     }
 
-    return new_ptr;
-}
+//     return new_ptr;
+// }
 
 #define xmalloc(size) _priv_xmalloc(__FILE__, __LINE__, size)
-#define xcalloc(nmemb, size) priv_xcalloc__(__FILE__, __LINE__, nmemb, size)
-#define xrealloc(ptr, size) _priv_xrealloc(__FILE__, __LINE__, ptr, size)
+#define xcalloc(nmemb, size) _priv_xcalloc__(__FILE__, __LINE__, nmemb, size)
+// #define xrealloc(ptr, size) _priv_xrealloc(__FILE__, __LINE__, ptr, size)
 
 /* we define a better assert than that from the stdilb
  */
@@ -131,20 +131,20 @@ typedef enum { DNA_A, DNA_C, DNA_T, DNA_G } dna_t;
 
 /* conversion functions
  */
-static ssize_t dna_to_int(dna_t const d) {
-    switch (d) {
-        case DNA_A:
-            return 0;
-        case DNA_C:
-            return 1;
-        case DNA_T:
-            return 2;
-        case DNA_G:
-            return 3;
-        default:
-            __builtin_unreachable();
-    }
-}
+// static ssize_t dna_to_int(dna_t const d) {
+//     switch (d) {
+//         case DNA_A:
+//             return 0;
+//         case DNA_C:
+//             return 1;
+//         case DNA_T:
+//             return 2;
+//         case DNA_G:
+//             return 3;
+//         default:
+//             __builtin_unreachable();
+//     }
+// }
 
 static dna_t char_to_dna(int const ch) {
     switch (ch) {
@@ -165,76 +165,53 @@ static dna_t char_to_dna(int const ch) {
 /* readline_into_buffer: read a line (with exponentially larger buffer size),
  * comming from an initial buffer
  *
- * @param stream          (in)     : stream to read
+ *  @param stream    (in)     : stream to read
  *
- * @param buffer          (in, out): not NULL
+ *  @param buffer    (in, out): not NULL
  *
- * @param buffer_capacity (in, out): capacity of the buffer. not NULL
+ *  @param size      (in)     : size of the buffer
  *
  * @return     number of characters read (excluding null byte);
  */
-static ssize_t readline_into_buffer(FILE *stream, dna_t **in_buffer,
-                                    ssize_t *in_buffer_capacity) {
-    dna_t *buffer = *in_buffer;
-    ssize_t capacity = *in_buffer_capacity;
+static ssize_t readline_into_buffer(FILE *stream, dna_t *buffer,
+                                    size_t size) {
 
-    ssize_t size = 0;
+    ssize_t i = 0;
     int32_t ch = fgetc(stream);
-    while (ch != '\n' && ch != EOF) {
-        if (size == capacity - 1) {
-            capacity *= 2;
-            buffer = xrealloc(buffer, (size_t)capacity * sizeof(dna_t));
-        }
-
-        buffer[size++] = char_to_dna(ch);
+    while (ch != '\n' && ch != EOF && i < size) {
+        buffer[i++] = char_to_dna(ch);
         ch = fgetc(stream);
     }
-
-    *in_buffer = buffer;
-    *in_buffer_capacity = capacity;
-    return size;
+    return i;
 }
 
 #else /* NDEBUG not defined */
 /*  readline_into_buffer_str: read a line (with exponentially larger buffer
  *  size), comming from an initial buffer; store the original string
  *
- *  @param stream          (in)     : stream to read
+ *  @param stream    (in)     : stream to read
  *
- *  @param str             (in, out): not NULL
+ *  @param str       (in, out): not NULL
  *
- *  @param buffer          (in, out): not NULL
+ *  @param buffer    (in, out): not NULL
  *
- *  @param buffer_capacity (in, out): capacity of the buffer. not NULL
+ *  @param size      (in)     : size of the buffer
  *
  *  @return     number of characters read (excluding null byte);
  */
-static ssize_t readline_into_buffer_str(FILE *stream, char **in_str,
-                                        dna_t **in_buffer,
-                                        ssize_t *in_buffer_capacity) {
-    char *str = *in_str;
-    dna_t *buffer = *in_buffer;
-    ssize_t capacity = *in_buffer_capacity;
+static size_t readline_into_buffer_str(FILE *stream, char *in_str,
+                                        dna_t *buffer, size_t size) {
 
-    ssize_t size = 0;
+    size_t i = 0;
     int32_t ch = fgetc(stream);
-    while (ch != '\n' && ch != EOF) {
-        if (size == capacity - 1) {
-            capacity *= 2;
-            str = xrealloc(str, (size_t)(capacity+1) * sizeof(char));
-            buffer = xrealloc(buffer, (size_t)capacity * sizeof(dna_t));
-        }
-
-        str[size] = (char)ch;
-        buffer[size++] = char_to_dna(ch);
+    while (ch != '\n' && ch != EOF && i < size) {
+        in_str[i] = (char)ch;
+        buffer[i++] = char_to_dna(ch);
         ch = fgetc(stream);
     }
 
-    str[size] = 0;
-    *in_str = str;
-    *in_buffer = buffer;
-    *in_buffer_capacity = capacity;
-    return size;
+    in_str[i] = 0;
+    return i;
 }
 #endif  /* NDEBUG */
 
@@ -247,7 +224,7 @@ typedef struct {
 #ifndef NDEBUG
     char *t_str;
 #endif  /* NDEBUG */
-    ssize_t t_size;
+    size_t t_size;
 } text_t;
 
 static int text_create(text_t *text, FILE *stream, size_t size) {
@@ -257,7 +234,7 @@ static int text_create(text_t *text, FILE *stream, size_t size) {
     readline_into_buffer(stream, &text->t_text, size);
 #else
     text->t_str = xmalloc((size + 1) * sizeof(char));
-    readline_into_buffer_str(stream, &text->t_str, &text->t_text, size);
+    readline_into_buffer_str(stream, text->t_str, text->t_text, size);
 #endif  /* NDEBUG */
 
     return 0;
@@ -281,17 +258,45 @@ static int text_delete(text_t *text) {
 
 /* ------------------------------------------------------------------------- */
 
-static text_t * parse_input(size_t * k) {
-    size_t k = 0, i = 0;
+typedef struct node* node_p;
+
+typedef struct node
+{
+    int Ti;             /* The value of i in Ti */
+    int head;           /* The path-label start at &(Ti[head]) */
+    int sdep;           /* String-Depth */
+    node_p child;       /* Child */
+    node_p brother;     /* brother */
+    node_p slink;       /* Suffix link */
+    node_p* hook;       /* What keeps this linked? */
+} node_t;
+
+typedef struct point* point_p;
+typedef struct point
+{
+    node_p a;       /* node above */
+    node_p b;       /* node bellow */
+    int s;          /* String-Depth */
+} point_t;
+
+/* ------------------------------------------------------------------------- */
+
+static text_t * parse_input(size_t * k, size_t * m) {
+    size_t i = 0;
     text_t * texts = NULL;
 
-    scanf("%zd", &k);
-    texts = xcalloc(0, sizeof(text_t));
+    scanf("%zu\n", k);
+    texts = xcalloc(*k, sizeof(text_t));
 
+    for (i = 0; i < *k; i++) {
+        size_t size;
+        scanf("%zu ", &size);
 
-    for (i=0; i < k; i++) {
+        if (size > *m) {
+            *m = size;
+        }
 
-
+        text_create(&texts[i], stdin, size);
     }
 
     return texts;
@@ -299,8 +304,15 @@ static text_t * parse_input(size_t * k) {
 
 
 int main() {
-    size_t k = 0;
-    text_t * texts = parse_input(&k);
+    size_t i = 0, k = 0, m = 0;
+    text_t * texts = parse_input(&k, &m);
+
+    // TODO
+
+    for (i = 0; i < k; i++) {
+        text_delete(&texts[i]);
+    }
+    free(texts);
 
     return 0;
 }
