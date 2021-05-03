@@ -258,26 +258,62 @@ static int text_delete(text_t *text) {
 
 /* ------------------------------------------------------------------------- */
 
-typedef struct node* node_p;
+typedef struct node node_t;
 
-typedef struct node
+struct node //maybe add a list of all texts that end in this node
 {
-    int Ti;             /* The value of i in Ti */
-    int head;           /* The path-label start at &(Ti[head]) */
-    int sdep;           /* String-Depth */
-    node_p child;       /* Child */
-    node_p brother;     /* brother */
-    node_p slink;       /* Suffix link */
-    node_p* hook;       /* What keeps this linked? */
-} node_t;
+    int Ti;                             /* The value of i in Ti */
+    int head;                           /* The path-label start at &(Ti[head]) */
+    int sdep;                           /* String-Depth */
+    node_t* child[DNA_SIGMA_SIZE];      /* Childs */
+    /*node_t* brother;*/     /* brother */
+    node_t* slink;                      /* Suffix link */
+    node_t** hook;
+};
 
-typedef struct point* point_p;
-typedef struct point
+typedef struct
 {
-    node_p a;       /* node above */
-    node_p b;       /* node bellow */
+    node_t* a;       /* node above */
+    node_t* b;       /* node bellow */
     int s;          /* String-Depth */
 } point_t;
+
+static bool can_descend() {
+    return false;
+}
+
+static void descend() {
+    return;
+}
+
+static void add_leaf() {
+    return;
+}
+
+static void suffix_link() {
+    return;
+}
+
+static size_t build_generalized_sufix_tree(node_t* tree, size_t k, text_t* texts) {
+    size_t i = 0, j, n = 0;
+    point_t p = {NULL, NULL, 0};
+
+    for(i = 0; i < k; i++) {  /* For every text */
+        text_t* text = &texts[i];
+
+        for(j = 0; j < text->t_size; j++) { /* For every suffix */
+            while (!can_descend())
+            {
+                add_leaf();
+                suffix_link();
+            }
+            descend();
+        }
+
+    }
+
+    return n;
+}
 
 /* ------------------------------------------------------------------------- */
 
@@ -305,9 +341,14 @@ static text_t * parse_input(size_t * k, size_t * m) {
 
 int main() {
     size_t i = 0, k = 0, m = 0;
+    node_t* tree = NULL;
     text_t * texts = parse_input(&k, &m);
 
-    // TODO
+    tree = xcalloc(m * 2 + 1, sizeof(node_t));
+
+    build_generalized_sufix_tree(tree, k, texts);
+
+    free(tree);
 
     for (i = 0; i < k; i++) {
         text_delete(&texts[i]);
