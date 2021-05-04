@@ -131,20 +131,20 @@ typedef enum { DNA_A, DNA_C, DNA_T, DNA_G } dna_t;
 
 /* conversion functions
  */
-// static ssize_t dna_to_int(dna_t const d) {
-//     switch (d) {
-//         case DNA_A:
-//             return 0;
-//         case DNA_C:
-//             return 1;
-//         case DNA_T:
-//             return 2;
-//         case DNA_G:
-//             return 3;
-//         default:
-//             __builtin_unreachable();
-//     }
-// }
+static ssize_t dna_to_int(dna_t const d) {
+    switch (d) {
+        case DNA_A:
+            return 0;
+        case DNA_C:
+            return 1;
+        case DNA_T:
+            return 2;
+        case DNA_G:
+            return 3;
+        default:
+            __builtin_unreachable();
+    }
+}
 
 static dna_t char_to_dna(int const ch) {
     switch (ch) {
@@ -260,7 +260,7 @@ static int text_delete(text_t *text) {
 
 typedef struct node node_t;
 
-struct node //maybe add a list of all texts that end in this node
+struct node //maybe add a list of all texts that pass in this node
 {
     int Ti;                             /* The value of i in Ti */
     int head;                           /* The path-label start at &(Ti[head]) */
@@ -275,11 +275,15 @@ typedef struct
 {
     node_t* a;       /* node above */
     node_t* b;       /* node bellow */
-    int s;          /* String-Depth */
+    int sdep;          /* String-Depth */
 } point_t;
 
-static bool can_descend() {
-    return false;
+static bool can_descend(point_t* point, dna_t dna, text_t* texts) {
+    if (point->a->sdep == point->sdep) { /* End of node above path label */
+        return point->b->child[dna_to_int(dna)] != NULL;
+    } else { /* middle of path label */
+        return texts[point->a->Ti].t_text[point->sdep + 1] == dna;
+    }
 }
 
 static void descend() {
@@ -290,22 +294,23 @@ static void add_leaf() {
     return;
 }
 
-static void suffix_link() {
+static void suffix_jump() {
     return;
 }
 
 static size_t build_generalized_sufix_tree(node_t* tree, size_t k, text_t* texts) {
     size_t i = 0, j, n = 0;
-    point_t p = {NULL, NULL, 0};
+    node_t* root = tree;
 
     for(i = 0; i < k; i++) {  /* For every text */
         text_t* text = &texts[i];
+        point_t p = {root, root, 0};
 
         for(j = 0; j < text->t_size; j++) { /* For every suffix */
-            while (!can_descend())
+            while (!can_descend(&p, text->t_text[j], texts))
             {
                 add_leaf();
-                suffix_link();
+                suffix_jump();
             }
             descend();
         }
@@ -344,7 +349,7 @@ int main() {
     node_t* tree = NULL;
     text_t * texts = parse_input(&k, &m);
 
-    tree = xcalloc(m * 2 + 1, sizeof(node_t));
+    tree = xcalloc(m * DNA_SIGMA_SIZE + 1, sizeof(node_t));
 
     build_generalized_sufix_tree(tree, k, texts);
 
