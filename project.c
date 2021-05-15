@@ -58,9 +58,9 @@
 #define ssize_t int64_t
 #endif
 
-// static inline int64_t max_i64(int64_t const a, int64_t const b) {
-//     return (a > b) ? a : b;
-// }
+static inline int64_t max_i64(int64_t const a, int64_t const b) {
+    return (a > b) ? a : b;
+}
 
 /* util functions for memory management
  */
@@ -93,16 +93,16 @@ static void *_priv_xcalloc__(char const *file, int lineno, size_t nmemb, size_t 
 
 /* checked realloc
  */
-// static void *_priv_xrealloc(char const *file, int lineno, void *ptr, size_t size) {
-//     void *new_ptr = realloc(ptr, size);
-//     if (size != 0 && new_ptr == NULL && ptr != NULL) {
-//         fprintf(stderr, "[ERROR] %s:%d | xrealloc failed: %s\n", file, lineno,
-//                 strerror(errno));
-//         exit(EXIT_FAILURE);
-//     }
+static void *_priv_xrealloc(char const *file, int lineno, void *ptr, size_t size) {
+    void *new_ptr = realloc(ptr, size);
+    if (size != 0 && new_ptr == NULL && ptr != NULL) {
+        fprintf(stderr, "[ERROR] %s:%d | xrealloc failed: %s\n", file, lineno,
+                strerror(errno));
+        exit(EXIT_FAILURE);
+    }
 
-//     return new_ptr;
-// }
+    return new_ptr;
+}
 
 #define xmalloc(size) _priv_xmalloc(__FILE__, __LINE__, size)
 #define xcalloc(nmemb, size) _priv_xcalloc__(__FILE__, __LINE__, nmemb, size)
@@ -258,23 +258,31 @@ static int text_delete(text_t *text) {
 
 /* ------------------------------------------------------------------------- */
 
-typedef struct node node_t;
-
-struct node //maybe add a list of all texts that pass in this node
+typedef struct st_node_t
 {
-    int Ti;                             /* The value of i in Ti */
-    int head;                           /* The path-label start at &(Ti[head]) */
-    int sdep;                           /* String-Depth */
-    node_t* child[DNA_SIGMA_SIZE];      /* Childs */
-    /*node_t* brother;*/     /* brother */
-    node_t* slink;                      /* Suffix link */
-    node_t** hook;
-};
+    /* Value of i in Ti */
+    size_t st_i;
+
+    /* Offset of the path label */
+    ssize_t st_path_off;
+
+    /* string depth */
+    ssize_t st_sdep;
+
+    /* children */
+    struct st_node_t* children[DNA_SIGMA_SIZE];
+
+    /* suffix link */
+    struct st_node_t* slink;
+
+    /* ??? */
+    struct st_node_t** hook;
+} st_node_t;
 
 typedef struct
 {
-    node_t* a;       /* node above */
-    node_t* b;       /* node bellow */
+    st_node_t* a;       /* node above */
+    st_node_t* b;       /* node bellow */
     int sdep;          /* String-Depth */
 } point_t;
 
@@ -298,11 +306,14 @@ static void suffix_jump() {
     return;
 }
 
-static size_t build_generalized_sufix_tree(node_t* tree, size_t k, text_t* texts) {
-    size_t i = 0, j, n = 0;
-    node_t* root = tree;
+static size_t st_build(st_node_t* tree, text_t* texts, size_t t_size) {
+    size_t i = 0;
+    size_t j = 0;
+    size_t n = 0;
 
-    for(i = 0; i < k; i++) {  /* For every text */
+    st_node_t* root = tree;
+
+    for(i = 0; i < t_size; ++i) {  /* For every text */
         text_t* text = &texts[i];
         point_t p = {root, root, 0};
 
@@ -322,19 +333,21 @@ static size_t build_generalized_sufix_tree(node_t* tree, size_t k, text_t* texts
 
 /* ------------------------------------------------------------------------- */
 
-static text_t * parse_input(size_t * k, size_t * m) {
+static text_t * parse_input(size_t * t_size, size_t * max_size) {
     size_t i = 0;
     text_t * texts = NULL;
 
-    scanf("%zu\n", k);
-    texts = xcalloc(*k, sizeof(text_t));
+    int n_matches = scanf("%zu\n", t_size);
+    assert(n_matches == 1, "failed to get the number of texts");
+    texts = xcalloc(*t_size, sizeof(text_t));
 
-    for (i = 0; i < *k; i++) {
+    for (i = 0; i < *t_size; i++) {
         size_t size;
-        scanf("%zu ", &size);
+        n_matches = scanf("%zu ", &size);
+        assert(n_matches == 1, "failed to get the length of a test");
 
-        if (size > *m) {
-            *m = size;
+        if (size > *max_size) {
+            *max_size = size;
         }
 
         text_create(&texts[i], stdin, size);
@@ -345,11 +358,12 @@ static text_t * parse_input(size_t * k, size_t * m) {
 
 
 int main() {
-    size_t i = 0, k = 0, m = 0;
-    node_t* tree = NULL;
-    text_t * texts = parse_input(&k, &m);
-
-    tree = xcalloc(m * DNA_SIGMA_SIZE + 1, sizeof(node_t));
+    size_t t_size = 0;
+    size_t max_text_size = 0;
+    size_t i = 0;
+    text_t * texts = parse_input(&t_size, &max_text_size);
+    st_node_t* tree = NULL;
+    tree = xcalloc(max_text_size * DNA_SIGMA_SIZE + 1, sizeof(st_node_t));
 
     build_generalized_sufix_tree(tree, k, texts);
 

@@ -1,6 +1,6 @@
 CFLAGS = -ansi -pedantic -Wall -Wextra -Wshadow -Wcast-align -Wunused -Wpedantic -Wconversion -Wsign-conversion -Wnull-dereference -Wdouble-promotion -Werror -Wno-unused-value
 
-CFLAGS += -std=c18
+CFLAGS += -std=c89
 CFLAGS += -fsanitize=address,leak
 #CFLAGS += -fsanitize=thread
 #CFLAGS += -fsanitize=memory
