@@ -296,25 +296,17 @@ typedef struct st_node_t
     /* suffix link */
     struct st_node_t* st_slink;
 
-    /* starting indexes on this node: meaning, this node refers to suffix S[start_idx..]
-     * these are *optional* values, with default value SIZE_MAX;
-     *
-     * NOTE (1): this is a vector allocated with N `size_t`s, where N is the numbero of texts
-     * This greatly simplifies the implementation (no need to implement resizable vectors)
-     * and makes the access faster (always O(1)). However, it does incurr a higher memory
-     * footprint. We believe this is acceptable given that the limiting factor (memory wise)
-     * are the texts and the number of nodes in the tree.
-     *
-     * NOTE (2): no need to store the length, as long as it is indexed by a valid node id, all is well
-     */
-    size_t * st_start_idx;
+    /* ??? */
+    bool * st_text_ids;
 } st_node_t;
 
-int     st_node_create(st_node_t * node, size_t start, size_t end, int id, size_t start_idx, size_t n_texts);
+int     st_node_create(st_node_t * node, size_t start, size_t end, int id, size_t n_texts);
 int     st_node_delete(st_node_t * node);
-void    st_node_add_text(st_node_t * node, int text_id, size_t start_offset);
-size_t  st_node_label_size(st_node_t const * node, size_t default_end);
+void    st_node_add_text(st_node_t * node, int text_id);
+size_t  st_node_edge_size(st_node_t const * node, size_t default_end);
+size_t  st_node_label_size(st_node_t const * node);
 size_t  st_node_n_texts(st_node_t const * node, size_t n_texts);
+bool    st_node_is_leaf(st_node_t const * node);
 
 /**
  * Create a new suffix tree node.
@@ -323,12 +315,10 @@ size_t  st_node_n_texts(st_node_t const * node, size_t n_texts);
  * @param   start     start index in the text
  * @param   end       end index in the text (one past the end): this field is optional with default value SIZE_MAX
  * @param   id        id of the text which creates the node: this field is optional with default value -1
- * @param   start_idx ????? (default value SIZE_MAX)
  *
  * @return  0   success
  */
-int st_node_create(st_node_t * node, size_t start, size_t end, int id, size_t start_idx, size_t n_texts) {
-    size_t idx = 0;
+int st_node_create(st_node_t * node, size_t start, size_t end, int id, size_t n_texts) {
     node->st_n_id = NODE_ID++;
     node->st_id = id;
     node->st_start = start;
@@ -337,12 +327,9 @@ int st_node_create(st_node_t * node, size_t start, size_t end, int id, size_t st
     memset(node->st_children, 0, DNA_SIGMA_SIZE * sizeof(st_node_t *));
     node->st_slink = NULL;
 
-    node->st_start_idx = xcalloc(n_texts, sizeof(size_t));
-    for (idx = 0; idx < n_texts; ++idx) {
-        node->st_start_idx[idx] = SIZE_MAX;
-    }
+    node->st_text_ids = xcalloc(n_texts, sizeof(bool));
 
-    st_node_add_text(node, id, start_idx);
+    st_node_add_text(node, id);
 
     return 0;
 }
@@ -363,35 +350,51 @@ int st_node_delete(st_node_t * node) {
     memset(node->st_children, 0, DNA_SIGMA_SIZE * sizeof(st_node_t *));
     node->st_slink = NULL;
 
-    free(node->st_start_idx);
-    node->st_start_idx = NULL;
+    free(node->st_text_ids);
+    node->st_text_ids = NULL;
 
     return 0;
 }
 
 /**
  * Add a text to the node
- * This basically adds its id as active and its start idx
+ * This basically adds its id as active
  *
  * @param   node            the node where we want the text to
  * @param   text_id         the id of the text: optional with default value -1
- * @param   start_offset    where the label starts in the text: optional with default value SIZE_MAX
  */
-void st_node_add_text(st_node_t * node, int text_id, size_t start_idx) {
-    if (text_id != -1 && start_idx != SIZE_MAX) {
-        node->st_start_idx[text_id] = start_idx;
+void st_node_add_text(st_node_t * node, int text_id) {
+    if (text_id != -1)  {
+        node->st_text_ids[text_id] = true;
     }
 }
 
 /**
+ * Get the size of the edge of this node
+ *
+ * @param   node            the node where we want the text to
+ * @return  size of the edge
+ */
+size_t  st_node_edge_size(st_node_t const * node, size_t default_end) {
+    size_t end = node->st_end != SIZE_MAX ? node->st_end : default_end;
+    return end + 1 - node->st_start;
+}
+
+/**
  * Get the size of the label of this node
+ * NOTE: a label size never counts the terminator
  *
  * @param   node            the node where we want the text to
  * @return  size of the label
  */
-size_t  st_node_label_size(st_node_t const * node, size_t default_end) {
-    size_t end = node->st_end != SIZE_MAX ? node->st_end : default_end;
-    return end + 1 - node->st_start;
+size_t  st_node_label_size(st_node_t const * node) {
+    if (st_node_is_leaf(node)) {
+        //LOG("label(%zu) = %zu | LEAF", node->st_n_id, node->st_end - 1 - node->st_start);
+        return node->st_end - 1 - node->st_start;
+    } else {
+        //LOG("label(%zu) = %zu | INNER", node->st_n_id, node->st_end + 1 - node->st_start);
+        return node->st_end + 1 - node->st_start;
+    }
 }
 
 /**
@@ -402,12 +405,27 @@ size_t  st_node_label_size(st_node_t const * node, size_t default_end) {
 size_t  st_node_n_texts(st_node_t const * node, size_t n_texts) {
     size_t count = 0;
     for (size_t idx = 0; idx < n_texts; ++idx) {
-        if (node->st_start_idx[idx] != SIZE_MAX) {
+        if (node->st_text_ids[idx]) {
             count += 1;
         }
     }
 
     return count;
+}
+
+/**
+ * Whether a node is a leaf or not
+ *
+ * @return  true  iff node is a leaf
+ */
+bool  st_node_is_leaf(st_node_t const * node) {
+    for (size_t idx = 0; idx < DNA_SIGMA_SIZE; ++idx) {
+        if (node->st_children[idx] != NULL) {
+            return false;
+        }
+    }
+
+    return true;
 }
 
 typedef void dfs_visitor_t(st_node_t *, void *);
@@ -473,9 +491,6 @@ typedef struct st_builder_t {
     /* ??? */
     size_t b_active_edge_idx;
 
-    /* for the current string, starting index of the suffix being processed */
-    size_t b_start_idx;
-
     /* ??? */
     size_t b_default_end;
 
@@ -491,6 +506,7 @@ int st_add_char(st_tree_t * const tree, st_builder_t * builder, text_t const * t
 bool st_builder_descend(st_builder_t * builder, text_t const * text, st_node_t * node);
 void st_builder_add_suffix_link(st_builder_t * const builder, st_node_t * node);
 st_node_t * st_add_leaf(st_tree_t * const tree, st_builder_t * builder, int text_id, size_t phase);
+void st_correct_ids(st_tree_t * const tree);
 
 int st_delete(st_tree_t * tree);
 int st_print(st_tree_t const * tree, FILE * stream);
@@ -518,7 +534,6 @@ int st_create(st_tree_t * tree, text_t * text_v, size_t text_s) {
                 0 /* start */,
                 SIZE_MAX /* end: default value */,
                 -1 /* text id */,
-                SIZE_MAX /* start_idx: default value */,
                 tree->st_n_texts) != 0) {
         return -1;
     }
@@ -536,6 +551,7 @@ int st_create(st_tree_t * tree, text_t * text_v, size_t text_s) {
     }
 
     free(builder.b_text_leaves);
+    st_correct_ids(tree);
     return 0;
 }
 
@@ -550,8 +566,6 @@ void st_deleter_visitor(st_node_t * node, void *_args) {
  * The suffix tree gain ownership over the texts, and `delete`s them on cleanup
  *
  * @param   tree      the tree to be created
- * @param   text_v    vector of texts
- * @param   text_s    size of vector of texts
  *
  * @return  0   success
  *         -1   failure
@@ -646,7 +660,7 @@ void dot_visitor(st_node_t * node, void * args) {
 
     if (count == 0) {
         for (idx = 0; idx < p_args->n_texts; ++idx) {
-            if (node->st_start_idx[idx] != SIZE_MAX) {
+            if (node->st_text_ids[idx]) {
                 fprintf(p_args->stream, "\t%zu [label=\"%zu\"] [shape=box];\n", node->st_n_id * 1000 + idx, idx);
                 fprintf(p_args->stream, "\t%zu -> %zu [color=red];\n", node->st_n_id, node->st_n_id * 1000 + idx);
             }
@@ -676,6 +690,29 @@ int st_dot(st_tree_t const * tree, FILE * stream) {
     return 0;
 }
 
+void st_correct_visitor(st_node_t * node, void *_args) {
+    size_t i = 0;
+    size_t j = 0;
+    st_tree_t * tree = (st_tree_t *)_args;
+
+    for (i = 0; i < DNA_SIGMA_SIZE; ++i) {
+        if (node->st_children[i] != NULL) {
+            for (j = 0; j < tree->st_n_texts; ++j) {
+                node->st_text_ids[j] |=  node->st_children[i]->st_text_ids[j];
+            }
+        }
+    }
+}
+
+/**
+ * Correct the ids of a tree
+ *
+ * @param   tree      the tree to be created
+ */
+void st_correct_ids(st_tree_t * tree) {
+    dfs_postorder(tree->st_root, st_correct_visitor, (void*)tree);
+}
+
 /**
  * Add a new text to the suffix tree
  * Note that the terminator is the additive symmetric of the id of the string
@@ -690,7 +727,6 @@ int st_dot(st_tree_t const * tree, FILE * stream) {
 int st_add_text(st_tree_t * const tree, st_builder_t * builder, text_t const * t) {
     size_t i = 0;
     builder->b_terminal = false;
-    builder->b_start_idx = 0;
 
     builder->b_text_leaves = xrealloc(builder->b_text_leaves, t->t_size * sizeof(st_node_t **));
     builder->b_text_leaves_size = 0;
@@ -751,8 +787,7 @@ int st_add_char(st_tree_t * const tree, st_builder_t * builder, text_t const * t
                 //LOG("character matched");
                 if (ch == DNA_TERM) { /* a terminal character */
                     //LOG("terminal character");
-                    st_node_add_text(next_node, text->t_id, builder->b_start_idx);
-                    builder->b_start_idx += 1;
+                    st_node_add_text(next_node, text->t_id);
                     if (!builder->b_terminal) {
                         //LOG("terminal er");
                         st_builder_add_suffix_link(builder, builder->b_active_node);
@@ -777,7 +812,6 @@ int st_add_char(st_tree_t * const tree, st_builder_t * builder, text_t const * t
                             next_node->st_start,
                             next_node->st_start + builder->b_active_length - 1,
                             next_node->st_id,
-                            SIZE_MAX,
                             tree->st_n_texts) != 0) {
                     return -1;
                 }
@@ -830,7 +864,7 @@ void st_builder_add_suffix_link(st_builder_t * const builder, st_node_t * node) 
 }
 
 bool st_builder_descend(st_builder_t * builder, text_t const * text, st_node_t * node) {
-    size_t edge_length = st_node_label_size(node, builder->b_default_end);
+    size_t edge_length = st_node_edge_size(node, builder->b_default_end);
     //LOG("trying to descend: { act_len: %zu, edge_length: %zu }", builder->b_active_length, edge_length);
     if (builder->b_active_length >= edge_length) {
         builder->b_active_length -= edge_length;
@@ -891,11 +925,11 @@ int st_node_lcs(st_node_t * node, size_t * lcs, size_t sdepth, size_t n_texts) {
         return 0;
     }
 
-    sdepth += node->st_end - node->st_start + 1;
-    LOG("node %4zu | sdepth %4zu | k %4zu | n_texts %4zu", node->st_n_id, sdepth, idx, n_texts);
+    sdepth += st_node_label_size(node);
+    //LOG("node %4zu | sdepth %4zu | k %4zu | n_texts %4zu", node->st_n_id, sdepth, idx, n_texts);
 
-    for (; idx <= n_texts; ++idx) {
-        LOG("%zu %zu", lcs[idx - 2], sdepth);
+    for (; idx >= 2; --idx) {
+        //LOG("%zu %zu", lcs[idx - 2], sdepth);
         if (lcs[idx - 2] < sdepth) {
             lcs[idx - 2] = sdepth;
         }
@@ -948,7 +982,6 @@ st_node_t * st_add_leaf(st_tree_t * const tree, st_builder_t * builder, int text
                 phase /* start */,
                 SIZE_MAX /* end: default value */,
                 text_id,
-                builder->b_start_idx /* start_idx: default value */,
                 tree->st_n_texts) != 0) {
         return NULL;
     }
@@ -1003,10 +1036,10 @@ int main() {
     lcs = xcalloc(generalized_tree.st_n_texts - 1, sizeof(size_t));
     assert(st_least_common_substr(&generalized_tree, lcs) == 0, "failed to compute lcs");
 
-    for (idx = 2; idx < generalized_tree.st_n_texts; ++idx) {
+    for (idx = 2; idx <= generalized_tree.st_n_texts; ++idx) {
         fprintf(stdout, "%zu ", lcs[idx - 2]);
     }
-    fprintf(stdout, "%zu\n", lcs[idx - 2]);
+    fputc('\n', stdout);
 
     free(lcs);
     st_delete(&generalized_tree);

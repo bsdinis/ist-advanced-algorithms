@@ -1,3 +1,6 @@
+*.dot
+*.pdf
+actual_output
 __pycache__
 # ---> C
 # Prerequisites

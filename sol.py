@@ -12,9 +12,12 @@ if __name__ == '__main__':
         strings.append(string)
 
     tree = SuffixTree(strings)
+    tree.correct_ids()
     with open('py_sol.dot', 'w') as f:
         tree.dot(f)
 
+    print(' '.join(str(l) for l in tree.lcs_all()))
+'''
     lens = list()
     for length in range(2, d+1):
         # This is a hack, we should probably change suffix_tree.py to receive the number of substrings
@@ -23,5 +26,6 @@ if __name__ == '__main__':
             tree = SuffixTree(sset)
             max_len = max(max_len, len(tree.lcs()[0]))
         lens.append(max_len)
-
     print(' '.join(str(l) for l in lens))
+'''
+

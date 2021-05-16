@@ -65,6 +65,9 @@ class SuffixTreeNode:
         if self.suffix_link is not None:
             print('\t{} -> {} [style=dotted];'.format(self.num, self.suffix_link.num), file=file)
 
+    def is_leaf(self):
+        return len(self.children) == 0
+
 class SuffixTree:
     def __init__(self, strings):
         # TODO: Allow single strings
@@ -193,7 +196,6 @@ class SuffixTree:
 
 
     def print(self):
-        print('printing')
         self._root.print(self._strings)
 
     def _preprocess_lca(self):
@@ -256,6 +258,39 @@ class SuffixTree:
             ids_and_indexes += list(zip(leaf.string_ids, leaf.start_idxs))
         return ids_and_indexes
 
+    def correct_ids(self):
+        def dfs(node):
+            if len(node.children) == 0:
+                return node.string_ids
+            else:
+                reachable = list()
+                for child in node.children.values():
+                    reachable += dfs(child)
+
+                node.string_ids = list(set(reachable))
+                return node.string_ids
+
+        dfs(self._root)
+
+    def lcs_all(self):
+        lcs = [0 for _ in range(len(self._strings) - 1)]
+
+        def dfs(node, sdepth):
+            sdepth += node.edge_length()
+            if node.is_leaf():
+                sdepth -= 1
+            n_active_strings = len(node.string_ids)
+            while n_active_strings >= 2:
+                lcs[n_active_strings - 2] = max(lcs[n_active_strings - 2], sdepth)
+                n_active_strings -= 1
+
+            for child in node.children.values():
+                dfs(child, sdepth)
+
+        for child in self._root.children.values():
+            dfs(child, 0)
+
+        return lcs
 
     def lcs(self):
         # Gusfield page 205 (9.7)
