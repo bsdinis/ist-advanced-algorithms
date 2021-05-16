@@ -12,7 +12,7 @@
 
 #define LINE_SIZE (4096)
 
-#if __STDC_VERSION__ == 199409L || __STRICT_ANSI__
+#if __STRICT_ANSI__ && false
 #define WEIRD_OLD_C_OMG_WHY_DO_U_DO_DIS_2_US
 #endif
 
@@ -127,11 +127,15 @@ static void *_priv_xrealloc(char const *file, int lineno, void *ptr, size_t size
  * Negative integers are the terminators.
  */
 typedef int dna_t;
-const int DNA_A = 0;
-const int DNA_C = 1;
-const int DNA_T = 2;
-const int DNA_G = 3;
-#define DNA_SIGMA_SIZE (4)  /* size of the alphabet */
+#define DNA_A (0)
+#define DNA_C (1)
+#define DNA_T (2)
+#define DNA_G (3)
+#define DNA_TERM (4)
+#define DNA_SIGMA_SIZE (5)  /* size of the alphabet */
+
+/* epsilon is not part of the alphabet */
+#define DNA_EPSILON (5)
 
 static dna_t char_to_dna(int const ch) {
     switch (ch) {
@@ -146,6 +150,10 @@ static dna_t char_to_dna(int const ch) {
         default:
             KILL("invalid DNA aminoacid: %c.", ch);
     }
+}
+
+static char dna_to_char(dna_t dna) {
+    return "ACTG$\x00"[dna];
 }
 
 #ifdef NDEBUG
@@ -227,7 +235,7 @@ static int text_create(text_t *text, FILE *stream, size_t size, int id) {
 #endif  /* NDEBUG */
 
     /* Add the terminator */
-    text->t_text[size] = -id;
+    text->t_text[size] = DNA_TERM;
 
     return 0;
 }
@@ -251,6 +259,7 @@ static int text_delete(text_t *text) {
 
 /* ------------------------------------------------------------------------- */
 
+size_t NODE_ID = 0;
 /* Node of the suffix tree
  *
  * This node has:
@@ -261,6 +270,10 @@ static int text_delete(text_t *text) {
  */
 typedef struct st_node_t
 {
+    /* id of this node
+     */
+    size_t st_n_id;
+
     /* id of the text which created the node
      *
      * NOTE: this is important because the st_start and st_end will refer to this text
@@ -283,7 +296,7 @@ typedef struct st_node_t
     /* suffix link */
     struct st_node_t* st_slink;
 
-    /* starting indexes on this node.
+    /* starting indexes on this node: meaning, this node refers to suffix S[start_idx..]
      * these are *optional* values, with default value SIZE_MAX;
      *
      * NOTE (1): this is a vector allocated with N `size_t`s, where N is the numbero of texts
@@ -301,6 +314,7 @@ int     st_node_create(st_node_t * node, size_t start, size_t end, int id, size_
 int     st_node_delete(st_node_t * node);
 void    st_node_add_text(st_node_t * node, int text_id, size_t start_offset);
 size_t  st_node_label_size(st_node_t const * node, size_t default_end);
+size_t  st_node_n_texts(st_node_t const * node, size_t n_texts);
 
 /**
  * Create a new suffix tree node.
@@ -314,6 +328,8 @@ size_t  st_node_label_size(st_node_t const * node, size_t default_end);
  * @return  0   success
  */
 int st_node_create(st_node_t * node, size_t start, size_t end, int id, size_t start_idx, size_t n_texts) {
+    size_t idx = 0;
+    node->st_n_id = NODE_ID++;
     node->st_id = id;
     node->st_start = start;
     node->st_end = end;
@@ -322,6 +338,9 @@ int st_node_create(st_node_t * node, size_t start, size_t end, int id, size_t st
     node->st_slink = NULL;
 
     node->st_start_idx = xcalloc(n_texts, sizeof(size_t));
+    for (idx = 0; idx < n_texts; ++idx) {
+        node->st_start_idx[idx] = SIZE_MAX;
+    }
 
     st_node_add_text(node, id, start_idx);
 
@@ -358,9 +377,9 @@ int st_node_delete(st_node_t * node) {
  * @param   text_id         the id of the text: optional with default value -1
  * @param   start_offset    where the label starts in the text: optional with default value SIZE_MAX
  */
-void st_node_add_text(st_node_t * node, int text_id, size_t start_offset) {
-    if (text_id != -1 && start_offset != SIZE_MAX) {
-        node->st_start_idx[text_id - 1] = start_offset;
+void st_node_add_text(st_node_t * node, int text_id, size_t start_idx) {
+    if (text_id != -1 && start_idx != SIZE_MAX) {
+        node->st_start_idx[text_id] = start_idx;
     }
 }
 
@@ -371,8 +390,24 @@ void st_node_add_text(st_node_t * node, int text_id, size_t start_offset) {
  * @return  size of the label
  */
 size_t  st_node_label_size(st_node_t const * node, size_t default_end) {
-    size_t end = node->st_end != 0 ? node->st_end : default_end;
-    return end - node->st_start;
+    size_t end = node->st_end != SIZE_MAX ? node->st_end : default_end;
+    return end + 1 - node->st_start;
+}
+
+/**
+ * Get the number of active texts in this node
+ *
+ * @return  number of active texts in this node
+ */
+size_t  st_node_n_texts(st_node_t const * node, size_t n_texts) {
+    size_t count = 0;
+    for (size_t idx = 0; idx < n_texts; ++idx) {
+        if (node->st_start_idx[idx] != SIZE_MAX) {
+            count += 1;
+        }
+    }
+
+    return count;
 }
 
 typedef void dfs_visitor_t(st_node_t *, void *);
@@ -393,7 +428,7 @@ void dfs_postorder(st_node_t * node, dfs_visitor_t visit, void * args) {
 
     for (idx = 0; idx < DNA_SIGMA_SIZE; ++idx) {
         if (node->st_children[idx] != NULL) {
-            dfs(node->st_children[idx], visit, args);
+            dfs_postorder(node->st_children[idx], visit, args);
         }
     }
     visit(node, args);
@@ -438,10 +473,7 @@ typedef struct st_builder_t {
     /* ??? */
     size_t b_active_edge_idx;
 
-    /* ??? */
-    size_t b_phase;
-
-    /* ??? */
+    /* for the current string, starting index of the suffix being processed */
     size_t b_start_idx;
 
     /* ??? */
@@ -452,12 +484,16 @@ typedef struct st_builder_t {
 } st_builder_t;
 
 int st_create(st_tree_t * tree, text_t * text_v, size_t text_s);
-int st_delete(st_tree_t * tree);
+
+/* auxiliar functions to st_create */
 int st_add_text(st_tree_t * const tree, st_builder_t * builder, text_t const * t);
-int st_add_char(st_tree_t * const tree, st_builder_t * builder, text_t const * text, dna_t ch);
+int st_add_char(st_tree_t * const tree, st_builder_t * builder, text_t const * text, dna_t ch, size_t phase);
 bool st_builder_descend(st_builder_t * builder, text_t const * text, st_node_t * node);
 void st_builder_add_suffix_link(st_builder_t * const builder, st_node_t * node);
-st_node_t * st_add_leaf(st_tree_t * const tree, st_builder_t * builder, int text_id);
+st_node_t * st_add_leaf(st_tree_t * const tree, st_builder_t * builder, int text_id, size_t phase);
+
+int st_delete(st_tree_t * tree);
+int st_print(st_tree_t const * tree, FILE * stream);
 
 /**
  * Create a new suffix tree, from a set of texts.
@@ -476,7 +512,7 @@ int st_create(st_tree_t * tree, text_t * text_v, size_t text_s) {
 
     tree->st_texts = text_v;
     tree->st_n_texts = text_s;
-    tree->st_root = xmalloc(sizeof(st_node_t *));
+    tree->st_root = xmalloc(sizeof(st_node_t));
     if (st_node_create(
                 tree->st_root,
                 0 /* start */,
@@ -487,17 +523,19 @@ int st_create(st_tree_t * tree, text_t * text_v, size_t text_s) {
         return -1;
     }
 
-    free(builder.b_text_leaves);
     memset(&builder, 0, sizeof(builder));
     builder.b_active_node = tree->st_root;
+    builder.b_active_edge = DNA_EPSILON;
 
     for (i = 0; i < text_s; ++i) {
+        //LOG("adding text %zu/%zu: %s", i, text_s, text_v[i].t_str);
         if (st_add_text(tree, &builder, &text_v[i]) != 0) {
             st_delete(tree);
             return -1;
         }
     }
 
+    free(builder.b_text_leaves);
     return 0;
 }
 
@@ -520,11 +558,120 @@ void st_deleter_visitor(st_node_t * node, void *_args) {
  */
 int st_delete(st_tree_t * tree) {
     size_t idx = 0;
-    dfs(tree->st_root, st_deleter_visitor, NULL);
+    dfs_postorder(tree->st_root, st_deleter_visitor, NULL);
 
     for (idx = 0; idx < tree->st_n_texts; ++idx) {
         text_delete(&tree->st_texts[idx]);
     }
+
+    return 0;
+}
+
+struct print_args {
+    FILE * stream;
+    text_t *texts;
+    size_t n_texts;
+};
+
+void print_visitor(st_node_t * node, void * args) {
+    size_t idx = 0;
+    struct print_args * p_args = (struct print_args *)args;
+
+
+    fprintf(p_args->stream, "[%p | %2d] \"", (void *)node, node->st_id);
+    if (node->st_id < 0) {
+        fprintf(p_args->stream, "<root>");
+    } else {
+        for (idx = node->st_start; idx <= node->st_end && idx < p_args->texts[node->st_id].t_size; ++idx) {
+            fputc(dna_to_char(p_args->texts[node->st_id].t_text[idx]), p_args->stream);
+        }
+    }
+
+    fputs("\" => [", p_args->stream);
+    for (idx = 0; idx < DNA_SIGMA_SIZE; ++idx) {
+        if (node->st_children[idx] != NULL) {
+            fputc(dna_to_char((int)idx), p_args->stream);
+        }
+    }
+
+    fputc(']', p_args->stream);
+
+    if (node->st_slink) {
+        fprintf(p_args->stream, " ~~~> %p", (void *)node->st_slink);
+    }
+    fputc('\n', p_args->stream);
+}
+
+/**
+ * Print a tree
+ *
+ * @param   tree      the tree to be created
+ * @param   stream    stream to direct output to
+ *
+ * @return  0   success
+ */
+int st_print(st_tree_t const * tree, FILE * stream) {
+    struct print_args args;
+    args.stream = stream;
+    args.texts = tree->st_texts;
+    args.n_texts = tree->st_n_texts;
+
+    dfs(tree->st_root, print_visitor, (void *)&args);
+
+    return 0;
+}
+
+void dot_visitor(st_node_t * node, void * args) {
+    size_t idx = 0;
+    size_t text_idx = 0;
+    size_t count = 0;
+    st_node_t * child = NULL;
+    struct print_args * p_args = (struct print_args *)args;
+
+    for (idx = 0; idx < DNA_SIGMA_SIZE; ++idx) {
+        if (node->st_children[idx] != NULL) {
+            child = node->st_children[idx];
+            count += 1;
+            fprintf(p_args->stream, "\t%zu -> %zu [label=\"", node->st_n_id, child->st_n_id);
+            for (text_idx = child->st_start; text_idx <= child->st_end && text_idx < p_args->texts[child->st_id].t_size; ++text_idx) {
+                fputc(dna_to_char(p_args->texts[child->st_id].t_text[text_idx]), p_args->stream);
+            }
+            fputs("\"];\n", p_args->stream);
+        }
+    }
+
+    if (node->st_slink != NULL) {
+        fprintf(p_args->stream, "\t%zu -> %zu [style=dotted];\n", node->st_n_id, node->st_slink->st_n_id);
+    }
+
+    if (count == 0) {
+        for (idx = 0; idx < p_args->n_texts; ++idx) {
+            if (node->st_start_idx[idx] != SIZE_MAX) {
+                fprintf(p_args->stream, "\t%zu [label=\"%zu\"] [shape=box];\n", node->st_n_id * 1000 + idx, idx);
+                fprintf(p_args->stream, "\t%zu -> %zu [color=red];\n", node->st_n_id, node->st_n_id * 1000 + idx);
+            }
+        }
+    }
+}
+
+/**
+ * Print a tree in the DOT format
+ *
+ * @param   tree      the tree to be created
+ * @param   stream    stream to direct output to
+ *
+ * @return  0   success
+ */
+int st_dot(st_tree_t const * tree, FILE * stream) {
+    struct print_args args;
+    args.stream = stream;
+    args.texts = tree->st_texts;
+    args.n_texts = tree->st_n_texts;
+
+    fputs("digraph python_graph {\n", stream);
+    dfs(tree->st_root, dot_visitor, (void *)&args);
+    fputs("}\n", stream);
+
 
     return 0;
 }
@@ -543,14 +690,13 @@ int st_delete(st_tree_t * tree) {
 int st_add_text(st_tree_t * const tree, st_builder_t * builder, text_t const * t) {
     size_t i = 0;
     builder->b_terminal = false;
-    builder->b_phase = 0;
     builder->b_start_idx = 0;
 
     builder->b_text_leaves = xrealloc(builder->b_text_leaves, t->t_size * sizeof(st_node_t **));
     builder->b_text_leaves_size = 0;
 
     for (i = 0; i < t->t_size; ++i) {
-        if (st_add_char(tree, builder, t, t->t_text[i]) != 0) {
+        if (st_add_char(tree, builder, t, t->t_text[i], i) != 0) {
             return -1;
         }
     }
@@ -572,41 +718,54 @@ int st_add_text(st_tree_t * const tree, st_builder_t * builder, text_t const * t
  * @return  0   success
  *         -1   failure
  */
-int st_add_char(st_tree_t * const tree, st_builder_t * builder, text_t const * text, dna_t ch) {
+int st_add_char(st_tree_t * const tree, st_builder_t * builder, text_t const * text, dna_t ch, size_t phase) {
     st_node_t * next_node = NULL;
     st_node_t * split_node = NULL;
     st_node_t * leaf = NULL;
 
-    builder->b_default_end = builder->b_phase;
+    builder->b_default_end = phase;
     builder->b_need_slink = NULL;
     builder->b_remainder += 1;
 
     while (builder->b_remainder > 0) {
+        /*LOG("add_char round: { act_len: %zu, act_edge: %c, act_edge_idx: %zu, remainder: %zu }",
+                builder->b_active_length,
+                dna_to_char(builder->b_active_edge),
+                builder->b_active_edge_idx,
+                builder->b_remainder
+                );*/
         if (builder->b_active_length == 0) {
-            builder->b_active_edge_idx = builder->b_phase;
+            //LOG("active length zero");
+            builder->b_active_edge_idx = phase;
             builder->b_active_edge = text->t_text[builder->b_active_edge_idx];
         }
 
         next_node = builder->b_active_node->st_children[builder->b_active_edge];
         if (next_node != NULL) {
+            //LOG("non-null next_node");
             if (st_builder_descend(builder, text, next_node)) {
+                //LOG("descended");
                 continue;
-            }
-
-            if (tree->st_texts[next_node->st_id].t_text[next_node->st_start + builder->b_active_length] == ch) {
+            } else if (tree->st_texts[next_node->st_id].t_text[next_node->st_start + builder->b_active_length] == ch) {
                 /* there is a match */
-                if (ch < 0) { /* a terminal character */
+                //LOG("character matched");
+                if (ch == DNA_TERM) { /* a terminal character */
+                    //LOG("terminal character");
                     st_node_add_text(next_node, text->t_id, builder->b_start_idx);
                     builder->b_start_idx += 1;
                     if (!builder->b_terminal) {
+                        //LOG("terminal er");
                         st_builder_add_suffix_link(builder, builder->b_active_node);
                         builder->b_terminal = true;
                     }
                 } else { /* we are just matching with the edge label */
+                    //LOG("non-terminal char");
                     builder->b_active_length += 1;
                     st_builder_add_suffix_link(builder, builder->b_active_node);
+                    break;
                 }
             } else {
+                //LOG("character mismatched");
                 /* this does not match, we need to break this up
                  *
                  * the split node is still associated with the previous
@@ -624,7 +783,7 @@ int st_add_char(st_tree_t * const tree, st_builder_t * builder, text_t const * t
                 }
 
                 builder->b_active_node->st_children[builder->b_active_edge] = split_node;
-                leaf = st_add_leaf(tree, builder, text->t_id);
+                leaf = st_add_leaf(tree, builder, text->t_id, phase);
                 if (leaf == NULL) {
                     return -1;
                 }
@@ -636,7 +795,8 @@ int st_add_char(st_tree_t * const tree, st_builder_t * builder, text_t const * t
                 st_builder_add_suffix_link(builder, split_node);
             }
         } else {
-            leaf = st_add_leaf(tree, builder, text->t_id);
+            //LOG("null next node");
+            leaf = st_add_leaf(tree, builder, text->t_id, phase);
             if (leaf == NULL) {
                 return -1;
             }
@@ -647,16 +807,16 @@ int st_add_char(st_tree_t * const tree, st_builder_t * builder, text_t const * t
 
         if (builder->b_active_node == tree->st_root && builder->b_active_length > 0) {
             builder->b_active_edge_idx += 1;
+            //LOG("here with %p[%zu]", (void*)text->t_text, builder->b_active_edge_idx);
             builder->b_active_edge = text->t_text[builder->b_active_edge_idx];
             builder->b_active_length -= 1;
         } else if (builder->b_active_node != tree->st_root) {
+            //LOG("active");
             builder->b_active_node = builder->b_active_node->st_slink;
         }
 
         builder->b_remainder -= 1;
     }
-
-    builder->b_phase += 1;
 
     return 0;
 }
@@ -671,6 +831,7 @@ void st_builder_add_suffix_link(st_builder_t * const builder, st_node_t * node) 
 
 bool st_builder_descend(st_builder_t * builder, text_t const * text, st_node_t * node) {
     size_t edge_length = st_node_label_size(node, builder->b_default_end);
+    //LOG("trying to descend: { act_len: %zu, edge_length: %zu }", builder->b_active_length, edge_length);
     if (builder->b_active_length >= edge_length) {
         builder->b_active_length -= edge_length;
         builder->b_active_edge_idx += edge_length;
@@ -721,53 +882,70 @@ struct lcs_visitor_args {
     size_t n_texts;
 };
 
-/* This visitor adds all the strings in the leaves */
-void lcs_visitor(st_node_t * node, void * args) {
-    struct lcs_visitor_args * lcs_args = (struct lcs_visitor_args *)args;
-    st_node_vec_t * L = lcs_args->L;
-    size_t n_texts = lcs_args->n_texts;
-    bool is_leaf = true;
-    dna_t idx = 0;
-    size_t i = 0;
-    for (idx = 0; is_leaf && idx < DNA_SIGMA_SIZE; ++idx) {
+int st_node_lcs(st_node_t * node, size_t * lcs, size_t sdepth, size_t n_texts) {
+    int ret = 0;
+    size_t idx = st_node_n_texts(node, n_texts);
+
+    if (idx < 2) {
+        /* no need to go on */
+        return 0;
+    }
+
+    sdepth += node->st_end - node->st_start + 1;
+    LOG("node %4zu | sdepth %4zu | k %4zu | n_texts %4zu", node->st_n_id, sdepth, idx, n_texts);
+
+    for (; idx <= n_texts; ++idx) {
+        LOG("%zu %zu", lcs[idx - 2], sdepth);
+        if (lcs[idx - 2] < sdepth) {
+            lcs[idx - 2] = sdepth;
+        }
+    }
+
+    for (idx = 0; idx < DNA_SIGMA_SIZE; ++idx) {
         if (node->st_children[idx] != NULL) {
-            is_leaf = false;
+            ret = st_node_lcs(node->st_children[idx], lcs, sdepth, n_texts);
+            if (ret != 0) {
+                return ret;
+            }
         }
     }
-
-    for (i = 0; i < n_texts; ++i) {
-        if (node->st_start_idx[i] != SIZE_MAX) {
-            assert(st_node_vec_push(&L[i], node) == 0, "failed to push to node vec");
-        }
-    }
-}
-
-/* Compute the size of the least common substring
- *
- * @param tree  Generalized suffix tree
- *
- * @return size of the least common substring
- */
-size_t st_least_common_substr_size(st_tree_t * tree) {
-    size_t idx = 0;
-    struct lcs_visitor_args args;
-    st_node_vec_t * L = xcalloc(tree->st_n_texts, sizeof(st_node_vec_t));
-    for (idx = 0; idx < tree->st_n_texts; ++idx) {
-        assert(st_node_vec_create(&L[idx]) == 0, "failed to create node vector");
-    }
-
-    args.L = L;
-    args.n_texts = tree->st_n_texts;
-    dfs(tree->st_root, lcs_visitor, (void *)&args);
 
     return 0;
 }
 
-st_node_t * st_add_leaf(st_tree_t * const tree, st_builder_t * builder, int text_id) {
+/* Compute the sizes of the longest least common substring among k of the strings in the subtrees
+ * k \in [2,n_texts]
+ *
+ * This is computed by performing a DFS in the tree.
+ * The DFS will maintain 2 types of state:
+ *  - vector of maximum size of the lcs between k strings;
+ *  - current string depth
+ *
+ * This will also check how many texts are active in a given path.
+ * Safety: lcs is a pointer to a vector with n_texts - 1 elements
+ *
+ * @param tree  Generalized suffix tree
+ *
+ * @return 0 success
+ */
+int st_least_common_substr(st_tree_t * tree, size_t * lcs) {
+    int ret = 0;
+    for (size_t idx = 0; idx < DNA_SIGMA_SIZE; ++idx) {
+        if (tree->st_root->st_children[idx] != NULL) {
+            ret = st_node_lcs(tree->st_root->st_children[idx], lcs, 0, tree->st_n_texts);
+            if (ret != 0) {
+                return ret;
+            }
+        }
+    }
+    return 0;
+}
+
+st_node_t * st_add_leaf(st_tree_t * const tree, st_builder_t * builder, int text_id, size_t phase) {
     st_node_t * leaf = xmalloc(sizeof(st_node_t));
     if (st_node_create(
                 leaf,
-                builder->b_phase /* start */,
+                phase /* start */,
                 SIZE_MAX /* end: default value */,
                 text_id,
                 builder->b_start_idx /* start_idx: default value */,
@@ -799,10 +977,7 @@ static text_t * parse_input(size_t * t_size, size_t * max_size) {
             *max_size = size;
         }
 
-        /* IDs need to start at 1.
-         * Otherwise the terminator -0 would collide with DNA_A
-         */
-        text_create(&texts[i], stdin, size, ((int)i) + 1);
+        text_create(&texts[i], stdin, size, (int)i);
     }
 
     return texts;
@@ -812,10 +987,28 @@ static text_t * parse_input(size_t * t_size, size_t * max_size) {
 int main() {
     size_t t_size = 0;
     size_t max_text_size = 0;
+    size_t * lcs = NULL;
+    size_t idx = 0;
     text_t * texts = parse_input(&t_size, &max_text_size);
     st_tree_t generalized_tree;
-    st_create(&generalized_tree, texts, t_size);
+    assert(st_create(&generalized_tree, texts, t_size) == 0, "failed to create the tree");
+    //LOG("finished creating");
 
+    //st_print(&generalized_tree, stderr);
+
+    FILE * stream = fopen("c_sol.dot", "w");
+    st_dot(&generalized_tree, stream);
+    fclose(stream);
+
+    lcs = xcalloc(generalized_tree.st_n_texts - 1, sizeof(size_t));
+    assert(st_least_common_substr(&generalized_tree, lcs) == 0, "failed to compute lcs");
+
+    for (idx = 2; idx < generalized_tree.st_n_texts; ++idx) {
+        fprintf(stdout, "%zu ", lcs[idx - 2]);
+    }
+    fprintf(stdout, "%zu\n", lcs[idx - 2]);
+
+    free(lcs);
     st_delete(&generalized_tree);
     free(texts);
 

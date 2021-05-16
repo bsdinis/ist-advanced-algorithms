@@ -1,6 +1,7 @@
 # ipsis verbis from https://github.com/Reddy2/suffix-tree
 
 from collections import Counter
+import sys
 
 
 class SuffixTreeNode:
@@ -37,7 +38,32 @@ class SuffixTreeNode:
     def edge_length(self):
         return self.end + 1 - self.start
 
+    def label(self, strings):
+        return strings[self.string_id][self.start:self.end+1]
 
+    def print(self, strings):
+        print('[{:2}] \"{}\" => [{}]'.format(
+            self.string_id if self.string_id is not None else '?',
+            strings[self.string_id][self.start:self.end+1] if self.string_id is not None else '????',
+            ''.join(self.children.keys()),
+            ))
+
+        for v in self.children.values():
+            v.print(strings)
+
+    def dot(self, strings, file):
+        for k in sorted(self.children):
+            print('\t{} -> {} [label=\"{}\"];'.format(self.num, self.children[k].num, self.children[k].label(strings)), file=file)
+
+        for k in sorted(self.children):
+            self.children[k].dot(strings, file)
+
+        if len(self.children) == 0:
+            for i in self.string_ids:
+                print('\t{} [label=\"{}\"] [shape=box];'.format(int(self.num) * 1000 + i, i), file=file)
+                print('\t{} -> {} [color=red];'.format(self.num, int(self.num) * 1000 + i), file=file)
+        if self.suffix_link is not None:
+            print('\t{} -> {} [style=dotted];'.format(self.num, self.suffix_link.num), file=file)
 
 class SuffixTree:
     def __init__(self, strings):
@@ -165,6 +191,10 @@ class SuffixTree:
 
         self._string_id += 1
 
+
+    def print(self):
+        print('printing')
+        self._root.print(self._strings)
 
     def _preprocess_lca(self):
         self._lca = LCA(self._root)
@@ -370,6 +400,11 @@ class SuffixTree:
                         edge_attr={'arrowsize': '0.4', 'fontsize': '10', 'weight': '3'})
         self._create_graph(graph, suffix_link, self._root)
         return graph
+
+    def dot(self, file=sys.stdout):
+        print('digraph python_graph {', file=file)
+        self._root.dot(self._strings, file)
+        print('}', file=file)
 
 
 

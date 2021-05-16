@@ -11,6 +11,10 @@ if __name__ == '__main__':
         size = int(size)
         strings.append(string)
 
+    tree = SuffixTree(strings)
+    with open('py_sol.dot', 'w') as f:
+        tree.dot(f)
+
     lens = list()
     for length in range(2, d+1):
         # This is a hack, we should probably change suffix_tree.py to receive the number of substrings
