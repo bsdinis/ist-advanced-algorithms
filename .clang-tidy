@@ -1,0 +1,5 @@
+---
+Checks:          '*,-fuchsia-*,-google-*,-zircon-*,-abseil-*,-modernize-use-trailing-return-type,-llvm*,-misc-no-recursion,-clang-analyzer-security.insecureAPI.DeprecatedOrUnsafeBufferHandling,'
+WarningsAsErrors: '*'
+HeaderFilterRegex: ''
+FormatStyle:     none
