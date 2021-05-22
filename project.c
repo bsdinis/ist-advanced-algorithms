@@ -567,8 +567,7 @@ size_t st_node_edge_size(st_node_t const *node, size_t default_end) {
  * @return  size of the label
  */
 size_t st_node_label_size(st_node_t const *node) {
-    /* TODO: this is a hack */
-    return (st_node_is_leaf(node)) ? node->st_end - 1 - node->st_start
+    return (st_node_is_leaf(node)) ? node->st_end - node->st_start
                                    : node->st_end + 1 - node->st_start;
 }
 
@@ -814,7 +813,7 @@ void print_visitor(st_node_t *node, void *args) {
 
     fprintf(p_args->stream, "[%p | %2d] \"", (void *)node, node->st_id);
     if (node->st_id < 0) {
-        fprintf(p_args->stream, "<root>");
+        fprintf(p_args->stream, "<root>\"");
     } else {
         for (idx = node->st_start;
              idx <= node->st_end && idx < p_args->texts[node->st_id].t_size;
@@ -822,8 +821,11 @@ void print_visitor(st_node_t *node, void *args) {
             fputc(dna_to_char(p_args->texts[node->st_id].t_text[idx]),
                   p_args->stream);
         }
+        fprintf(p_args->stream, "\"\ts: %4zu | e: %4zu", node->st_start,
+                node->st_end);
     }
 
+    /*
     fputs("\" => [", p_args->stream);
     for (idx = 0; idx < DNA_SIGMA_SIZE; ++idx) {
         if (node->st_children[idx] != NULL) {
@@ -836,6 +838,7 @@ void print_visitor(st_node_t *node, void *args) {
     if (node->st_slink) {
         fprintf(p_args->stream, " ~~~> %p", (void *)node->st_slink);
     }
+    */
     fputc('\n', p_args->stream);
 }
 
@@ -1001,7 +1004,8 @@ int st_add_text(st_tree_t *const tree, st_builder_t *builder, text_t const *t) {
     }
 
     for (i = 0; i < builder->b_text_leaves_size; ++i) {
-        builder->b_text_leaves[i]->st_end = t->t_size;
+        /* Since the end is inclusive, we want t_size - 1 */
+        builder->b_text_leaves[i]->st_end = t->t_size - 1;
     }
 
     builder->b_text_leaves_size = 0;
