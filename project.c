@@ -336,6 +336,99 @@ int text_delete(text_t *text) {
 }
 
 /***
+ * A bitmask
+ */
+typedef struct bitmask_t {
+    uint64_t *bm_ints;
+    size_t bm_width;
+} bitmask_t;
+
+/**
+ * Create a bitmask
+ *
+ * @param   bm       bitmask
+ * @param   width width of the mask
+ *
+ * @return  0 success
+ */
+int bm_create(bitmask_t *bm, size_t width) {
+    /*
+     * 63 bits -> 1 int
+     * 64 bits -> 1 int
+     * 65 bits -> 2 ints
+     */
+    size_t n_ints = (width - 1) / 64 + 1; /* NOLINT */
+
+    bm->bm_ints = xcalloc(n_ints, sizeof(uint64_t));
+    bm->bm_width = width;
+    return 0;
+}
+
+/**
+ * Delete a bitmask
+ *
+ * @param   bm       bitmask
+ * @return  0 success
+ */
+int bm_delete(bitmask_t *bm) {
+    free(bm->bm_ints);
+    bm->bm_ints = NULL;
+    bm->bm_width = 0;
+    return 0;
+}
+
+/**
+ * Set a bit in the bitmask
+ *
+ * @param   bm      bitmask
+ * @param   index   index to set
+ *
+ * @panic   if index is out of bounds (index must be < bm->bm_width)
+ */
+void bm_set(bitmask_t *bm, size_t index) {
+    size_t int_index = index / 64; /* NOLINT */
+    size_t bit_index = index % 64; /* NOLINT */
+    assert(index < bm->bm_width, "out of bounds access in a bitmask");
+
+    bm->bm_ints[int_index] |= (((uint64_t)1) << bit_index);
+}
+
+/**
+ * Get a bit in the bitmask
+ *
+ * @param   bm      bitmask
+ * @param   index   index to set
+ *
+ * @panic   if index is out of bounds (index must be < bm->bm_width)
+ * @return  whether the bit is set
+ */
+bool bm_get(bitmask_t const *bm, size_t index) {
+    size_t int_index = index / 64; /* NOLINT */
+    size_t bit_index = index % 64; /* NOLINT */
+    assert(index < bm->bm_width, "out of bounds access in a bitmask");
+
+    return (bm->bm_ints[int_index] & (((uint64_t)1) << bit_index)) != 0;
+}
+
+/**
+ * Get number of set bits in the bitmask
+ * This is the equivalent of the popcount instruction
+ * Also called the Hamming weight
+ *
+ * @param bm        bitmask
+ */
+size_t bm_popcnt(bitmask_t const *bm) {
+    size_t n_ints = (bm->bm_width - 1) / 64 + 1; /* NOLINT */
+    size_t idx = 0;
+    size_t popcnt = 0;
+    for (idx = 0; idx < n_ints; ++idx) {
+        popcnt += (size_t)__builtin_popcountll(bm->bm_ints[idx]);
+    }
+
+    return popcnt;
+}
+
+/***
  * Node of the suffix tree
  *
  * This node has:
@@ -374,9 +467,8 @@ typedef struct st_node_t {
     struct st_node_t *st_slink;
 
     /* which texts are active in this node
-     * TODO: convert this to a bitmask
      */
-    bool *st_text_ids;
+    bitmask_t st_text_ids;
 } st_node_t;
 
 int st_node_create(st_node_t *node, size_t start, size_t end, int id,
@@ -385,7 +477,7 @@ int st_node_delete(st_node_t *node);
 void st_node_add_text(st_node_t *node, int text_id);
 size_t st_node_edge_size(st_node_t const *node, size_t default_end);
 size_t st_node_label_size(st_node_t const *node);
-size_t st_node_n_texts(st_node_t const *node, size_t n_texts);
+size_t st_node_n_texts(st_node_t const *node);
 bool st_node_is_leaf(st_node_t const *node);
 
 /**
@@ -414,7 +506,9 @@ int st_node_create(st_node_t *node, size_t start, size_t end, int id,
            DNA_SIGMA_SIZE * sizeof(st_node_t *));
     node->st_slink = NULL;
 
-    node->st_text_ids = xcalloc(n_texts, sizeof(bool));
+    if (bm_create(&node->st_text_ids, n_texts) != 0) {
+        return -1;
+    }
 
     st_node_add_text(node, id);
 
@@ -438,10 +532,7 @@ int st_node_delete(st_node_t *node) {
            DNA_SIGMA_SIZE * sizeof(st_node_t *)); /* NOLINT */
     node->st_slink = NULL;
 
-    free(node->st_text_ids);
-    node->st_text_ids = NULL;
-
-    return 0;
+    return bm_delete(&node->st_text_ids);
 }
 
 /**
@@ -453,7 +544,7 @@ int st_node_delete(st_node_t *node) {
  */
 void st_node_add_text(st_node_t *node, int text_id) {
     if (text_id != -1) {
-        node->st_text_ids[text_id] = true;
+        bm_set(&node->st_text_ids, (size_t)text_id);
     }
 }
 
@@ -476,6 +567,7 @@ size_t st_node_edge_size(st_node_t const *node, size_t default_end) {
  * @return  size of the label
  */
 size_t st_node_label_size(st_node_t const *node) {
+    /* TODO: this is a hack */
     return (st_node_is_leaf(node)) ? node->st_end - 1 - node->st_start
                                    : node->st_end + 1 - node->st_start;
 }
@@ -485,16 +577,8 @@ size_t st_node_label_size(st_node_t const *node) {
  *
  * @return  number of active texts in this node
  */
-size_t st_node_n_texts(st_node_t const *node, size_t n_texts) {
-    size_t count = 0;
-    size_t idx = 0;
-    for (idx = 0; idx < n_texts; ++idx) {
-        if (node->st_text_ids[idx]) {
-            count += 1;
-        }
-    }
-
-    return count;
+size_t st_node_n_texts(st_node_t const *node) {
+    return bm_popcnt(&node->st_text_ids);
 }
 
 /**
@@ -661,6 +745,7 @@ int st_create(st_tree_t *tree, text_t *text_v, size_t text_s) {
 
     for (i = 0; i < text_s; ++i) {
         if (st_add_text(tree, &builder, &text_v[i]) != 0) {
+            free(builder.b_text_leaves);
             st_delete(tree);
             return -1;
         }
@@ -804,7 +889,7 @@ void dot_visitor(st_node_t *node, void *args) {
 
     if (count == 0) {
         for (idx = 0; idx < p_args->n_texts; ++idx) {
-            if (node->st_text_ids[idx]) {
+            if (bm_get(&node->st_text_ids, idx)) {
                 fprintf(p_args->stream, "\t%zu [label=\"%zu\"] [shape=box];\n",
                         node->st_n_id * 1000 + idx, idx); /* NOLINT */
                 fprintf(p_args->stream, "\t%zu -> %zu [color=red];\n",
@@ -871,7 +956,9 @@ void st_correct_visitor(st_node_t *node, void *_args) {
     for (i = 0; i < DNA_SIGMA_SIZE; ++i) {
         if (node->st_children[i] != NULL) {
             for (j = 0; j < tree->st_n_texts; ++j) {
-                node->st_text_ids[j] |= node->st_children[i]->st_text_ids[j];
+                if (bm_get(&node->st_children[i]->st_text_ids, j)) {
+                    bm_set(&node->st_text_ids, j);
+                }
             }
         }
     }
@@ -1024,7 +1111,9 @@ int st_add_char(st_tree_t *const tree, st_builder_t *builder,
 
 /**
  * Add a suffix link to the tree.
- * TODO: check whether these are necessary
+ *
+ * @param   builder builder to add the (stored) suffix link to
+ * @param   node    suffix link pointer
  */
 void st_builder_add_suffix_link(st_builder_t *const builder, st_node_t *node) {
     if (builder->b_need_slink != NULL) {
@@ -1037,6 +1126,11 @@ void st_builder_add_suffix_link(st_builder_t *const builder, st_node_t *node) {
 /**
  * Descend in the subtree
  *
+ * @param   builder the builder
+ * @param   text    text being added
+ * @param   node    current node
+ *
+ * @return  whether it did descend or not
  */
 bool st_builder_descend(st_builder_t *builder, text_t const *text,
                         st_node_t *node) {
@@ -1128,7 +1222,7 @@ int st_node_vec_push(st_node_vec_t *vec, st_node_t *node) {
 int st_node_lcs(st_node_t *node, size_t *lcs, size_t sdepth, size_t n_texts) {
     int ret = 0;
     dna_t idx = 0;
-    size_t num_texts = st_node_n_texts(node, n_texts);
+    size_t num_texts = st_node_n_texts(node);
 
     if (num_texts < 2) {
         /* no need to go on */
