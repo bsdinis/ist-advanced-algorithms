@@ -58,4 +58,6 @@ dkms.conf
 
 .vscode
 
+tests/TFUZZ/*
+
 project

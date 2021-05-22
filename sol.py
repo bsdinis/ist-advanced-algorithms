@@ -16,7 +16,7 @@ if __name__ == '__main__':
     with open('py_sol.dot', 'w') as f:
         tree.dot(f)
 
-    print(' '.join(str(l) for l in tree.lcs_all()))
+    print(' '.join(str(l) for l in tree.lcs_all()), end=" \n")
 '''
     lens = list()
     for length in range(2, d+1):
