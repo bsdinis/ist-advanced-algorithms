@@ -110,11 +110,14 @@ void *_priv_xmalloc(char const *file, int lineno, size_t size) {
  * @return  pointer to allocated block (guaranteed to be valid and zeroed out)
  */
 void *_priv_xcalloc__(char const *file, int lineno, size_t nmemb, size_t size) {
-    void *ptr = calloc(nmemb, size);
-    if (ptr == NULL && size != 0) {
-        fprintf(stderr, "[ERROR] %s:%d | xcalloc failed: %s\n", file, lineno,
-                strerror(errno));
-        exit(EXIT_FAILURE);
+    void *ptr = NULL;
+    if (nmemb != 0 && size != 0) {
+        ptr = calloc(nmemb, size);
+        if (ptr == NULL) {
+            fprintf(stderr, "[ERROR] %s:%d | xcalloc failed: %s\n", file,
+                    lineno, strerror(errno));
+            exit(EXIT_FAILURE);
+        }
     }
 
     return ptr;
@@ -408,6 +411,21 @@ bool bm_get(bitmask_t const *bm, size_t index) {
     assert(index < bm->bm_width, "out of bounds access in a bitmask");
 
     return (bm->bm_ints[int_index] & (((uint64_t)1) << bit_index)) != 0;
+}
+
+/**
+ * Or two bitmask
+ *
+ * @param   a       first bitmask (will store the result)
+ * @param   b       second bitmask
+ */
+void bm_or(bitmask_t *a, bitmask_t *b) {
+    size_t a_n_ints = (a->bm_width - 1) / 64 + 1; /* NOLINT */
+    size_t b_n_ints = (b->bm_width - 1) / 64 + 1; /* NOLINT */
+    size_t idx = 0;
+    for (idx = 0; idx < a_n_ints && idx < b_n_ints; ++idx) {
+        a->bm_ints[idx] |= b->bm_ints[idx];
+    }
 }
 
 /**
@@ -952,17 +970,12 @@ st_node_t *st_add_leaf(st_tree_t *const tree, st_builder_t *builder,
  * TODO: remove this function
  */
 void st_correct_visitor(st_node_t *node, void *_args) {
-    size_t i = 0;
-    size_t j = 0;
-    st_tree_t *tree = (st_tree_t *)_args;
+    (void)_args;
+    dna_t i = 0;
 
     for (i = 0; i < DNA_SIGMA_SIZE; ++i) {
         if (node->st_children[i] != NULL) {
-            for (j = 0; j < tree->st_n_texts; ++j) {
-                if (bm_get(&node->st_children[i]->st_text_ids, j)) {
-                    bm_set(&node->st_text_ids, j);
-                }
-            }
+            bm_or(&node->st_text_ids, &node->st_children[i]->st_text_ids);
         }
     }
 }
@@ -975,7 +988,7 @@ void st_correct_visitor(st_node_t *node, void *_args) {
  * @param   tree      the tree to be created
  */
 void st_correct_ids(st_tree_t *tree) {
-    dfs_post_order(tree->st_root, st_correct_visitor, (void *)tree);
+    dfs_post_order(tree->st_root, st_correct_visitor, NULL);
 }
 
 /**
