@@ -486,14 +486,14 @@ typedef struct st_node_t {
 
     /* which texts are active in this node
      */
-    bitmask_t st_text_ids;
+    bitmask_t st_active_texts;
 } st_node_t;
 
 int st_node_create(st_node_t *node, size_t start, size_t end, int id,
                    size_t n_texts);
 int st_node_delete(st_node_t *node);
 void st_node_add_text(st_node_t *node, int text_id);
-size_t st_node_edge_size(st_node_t const *node, size_t default_end);
+size_t st_node_edge_size(st_node_t const *node, size_t current_end);
 size_t st_node_label_size(st_node_t const *node);
 size_t st_node_n_texts(st_node_t const *node);
 bool st_node_is_leaf(st_node_t const *node);
@@ -524,7 +524,7 @@ int st_node_create(st_node_t *node, size_t start, size_t end, int id,
            DNA_SIGMA_SIZE * sizeof(st_node_t *));
     node->st_slink = NULL;
 
-    if (bm_create(&node->st_text_ids, n_texts) != 0) {
+    if (bm_create(&node->st_active_texts, n_texts) != 0) {
         return -1;
     }
 
@@ -550,7 +550,7 @@ int st_node_delete(st_node_t *node) {
            DNA_SIGMA_SIZE * sizeof(st_node_t *)); /* NOLINT */
     node->st_slink = NULL;
 
-    return bm_delete(&node->st_text_ids);
+    return bm_delete(&node->st_active_texts);
 }
 
 /**
@@ -562,7 +562,7 @@ int st_node_delete(st_node_t *node) {
  */
 void st_node_add_text(st_node_t *node, int text_id) {
     if (text_id != -1) {
-        bm_set(&node->st_text_ids, (size_t)text_id);
+        bm_set(&node->st_active_texts, (size_t)text_id);
     }
 }
 
@@ -572,8 +572,8 @@ void st_node_add_text(st_node_t *node, int text_id) {
  * @param   node            the node where we want the text to
  * @return  size of the edge
  */
-size_t st_node_edge_size(st_node_t const *node, size_t default_end) {
-    size_t end = node->st_end != SIZE_MAX ? node->st_end : default_end;
+size_t st_node_edge_size(st_node_t const *node, size_t current_end) {
+    size_t end = node->st_end != SIZE_MAX ? node->st_end : current_end;
     return end + 1 - node->st_start;
 }
 
@@ -595,7 +595,7 @@ size_t st_node_label_size(st_node_t const *node) {
  * @return  number of active texts in this node
  */
 size_t st_node_n_texts(st_node_t const *node) {
-    return bm_popcnt(&node->st_text_ids);
+    return bm_popcnt(&node->st_active_texts);
 }
 
 /**
@@ -693,14 +693,14 @@ typedef struct st_builder_t {
     /* length of the edge being added to */
     size_t b_active_length;
 
-    /* last character added */
-    dna_t b_active_edge;
-
     /* index of the last character added in its string */
     size_t b_active_edge_idx;
 
+    /* last character added */
+    dna_t b_active_edge;
+
     /* default end for an unterminated label */
-    size_t b_default_end;
+    size_t b_current_end;
 
     /* are we in a terminal character? */
     bool b_terminal;
@@ -729,7 +729,6 @@ bool st_builder_descend(st_builder_t *builder, text_t const *text,
 void st_builder_add_suffix_link(st_builder_t *builder, st_node_t *node);
 st_node_t *st_add_leaf(st_tree_t *tree, st_builder_t *builder, int text_id,
                        size_t phase);
-void st_correct_ids(st_tree_t *tree);
 
 /**
  * Create a new suffix tree, from a set of texts.
@@ -769,7 +768,6 @@ int st_create(st_tree_t *tree, text_t *text_v, size_t text_s) {
     }
 
     free(builder.b_text_leaves);
-    st_correct_ids(tree);
     return 0;
 }
 
@@ -827,8 +825,22 @@ struct print_args {
  */
 void print_visitor(st_node_t *node, void *args) {
     size_t idx = 0;
+    bool first = true;
     struct print_args *p_args = (struct print_args *)args;
 
+    fprintf(p_args->stream, "[%3zu] ", node->st_n_id);
+    for (idx = 0; idx < p_args->n_texts; ++idx) {
+        if (bm_get(&node->st_active_texts, idx)) {
+            if (first) {
+                fprintf(p_args->stream, "%3zu", idx);
+                first = false;
+            } else {
+                fprintf(p_args->stream, ", %3zu", idx);
+            }
+        }
+    }
+    fputc('\n', p_args->stream);
+#if 0
     fprintf(p_args->stream, "[%p | %2d] \"", (void *)node, node->st_id);
     if (node->st_id < 0) {
         fprintf(p_args->stream, "<root>\"");
@@ -858,6 +870,7 @@ void print_visitor(st_node_t *node, void *args) {
     }
     */
     fputc('\n', p_args->stream);
+#endif
 }
 
 /**
@@ -910,7 +923,7 @@ void dot_visitor(st_node_t *node, void *args) {
 
     if (count == 0) {
         for (idx = 0; idx < p_args->n_texts; ++idx) {
-            if (bm_get(&node->st_text_ids, idx)) {
+            if (bm_get(&node->st_active_texts, idx)) {
                 fprintf(p_args->stream, "\t%zu [label=\"%zu\"] [shape=box];\n",
                         node->st_n_id * 1000 + idx, idx); /* NOLINT */
                 fprintf(p_args->stream, "\t%zu -> %zu [color=red];\n",
@@ -967,31 +980,6 @@ st_node_t *st_add_leaf(st_tree_t *const tree, st_builder_t *builder,
 }
 
 /**
- * TODO: remove this function
- */
-void st_correct_visitor(st_node_t *node, void *_args) {
-    (void)_args;
-    dna_t i = 0;
-
-    for (i = 0; i < DNA_SIGMA_SIZE; ++i) {
-        if (node->st_children[i] != NULL) {
-            bm_or(&node->st_text_ids, &node->st_children[i]->st_text_ids);
-        }
-    }
-}
-
-/**
- * Correct the ids of a tree
- * TODO: remove this function, making sure this is done inside the tree
- * construction
- *
- * @param   tree      the tree to be created
- */
-void st_correct_ids(st_tree_t *tree) {
-    dfs_post_order(tree->st_root, st_correct_visitor, NULL);
-}
-
-/**
  * Add a new text to the suffix tree
  * Note that the terminator is the additive symmetric of the id of the string
  *
@@ -1040,7 +1028,7 @@ int st_add_char(st_tree_t *const tree, st_builder_t *builder,
     st_node_t *split_node = NULL;
     st_node_t *leaf = NULL;
 
-    builder->b_default_end = phase;
+    builder->b_current_end = phase;
     builder->b_need_slink = NULL;
     builder->b_remainder += 1;
 
@@ -1151,7 +1139,7 @@ void st_builder_add_suffix_link(st_builder_t *const builder, st_node_t *node) {
  */
 bool st_builder_descend(st_builder_t *builder, text_t const *text,
                         st_node_t *node) {
-    size_t edge_length = st_node_edge_size(node, builder->b_default_end);
+    size_t edge_length = st_node_edge_size(node, builder->b_current_end);
     if (builder->b_active_length >= edge_length) {
         builder->b_active_length -= edge_length;
         builder->b_active_edge_idx += edge_length;
@@ -1226,7 +1214,13 @@ int st_node_vec_push(st_node_vec_t *vec, st_node_t *node) {
 
 /**
  * Compute the sizes of the Least-common-substrings of k strings (with k from 2
- * to n_texts) Performs a DFS on the generalized suffix tree
+ * to n_texts)
+ *
+ * Performs a post-order DFS on the generalized suffix tree.
+ *
+ * The DFS has to be post-order because we first need to correct the active_ids
+ * in the graph, due to the fact that it may be impossible to get this right
+ * while constructing the tree, because of slinks.
  *
  * @param   node    node to start the DFS on
  * @param   lcs     [IN/OUT] - array to place the incremental results of the LCS
@@ -1239,19 +1233,9 @@ int st_node_vec_push(st_node_vec_t *vec, st_node_t *node) {
 int st_node_lcs(st_node_t *node, size_t *lcs, size_t sdepth, size_t n_texts) {
     int ret = 0;
     dna_t idx = 0;
-    size_t num_texts = st_node_n_texts(node);
-
-    if (num_texts < 2) {
-        /* no need to go on */
-        return 0;
-    }
+    size_t num_texts = 0;
 
     sdepth += st_node_label_size(node);
-    for (; num_texts >= 2; --num_texts) {
-        if (lcs[num_texts - 2] < sdepth) {
-            lcs[num_texts - 2] = sdepth;
-        }
-    }
 
     for (idx = 0; idx < DNA_SIGMA_SIZE; ++idx) {
         if (node->st_children[idx] != NULL) {
@@ -1259,6 +1243,24 @@ int st_node_lcs(st_node_t *node, size_t *lcs, size_t sdepth, size_t n_texts) {
             if (ret != 0) {
                 return ret;
             }
+
+            /* Guarantees that the set of active text ids is correct
+             * This is the reason we need to be post-order in this DFS
+             */
+            bm_or(&node->st_active_texts,
+                  &node->st_children[idx]->st_active_texts);
+        }
+    }
+
+    num_texts = st_node_n_texts(node);
+    if (num_texts < 2) {
+        /* no need to go on */
+        return 0;
+    }
+
+    for (; num_texts >= 2; --num_texts) {
+        if (lcs[num_texts - 2] < sdepth) {
+            lcs[num_texts - 2] = sdepth;
         }
     }
 
@@ -1338,6 +1340,7 @@ int main() {
     stream = fopen("c_sol.dot", "we");
     st_dot(&generalized_tree, stream);
     fclose(stream);
+    /*st_print(&generalized_tree, stderr);*/
 #endif
 
     lcs = xcalloc(generalized_tree.st_n_texts - 1, sizeof(size_t));

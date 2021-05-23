@@ -41,15 +41,16 @@ class SuffixTreeNode:
     def label(self, strings):
         return strings[self.string_id][self.start:self.end+1]
 
-    def print(self, strings):
-        print('[{:2}] \"{}\" => [{}]'.format(
-            self.string_id if self.string_id is not None else '?',
-            strings[self.string_id][self.start:self.end+1] if self.string_id is not None else '????',
-            ''.join(self.children.keys()),
-            ))
+    def print(self, strings, file):
+        print('[{:>4}] {}'.format(self.num, ', '.join('{:3}'.format(i) for i in self.string_ids)), file=file)
+       #print('[{:2}] \"{}\" => [{}]'.format(
+       #    self.string_id if self.string_id is not None else '?',
+       #    strings[self.string_id][self.start:self.end+1] if self.string_id is not None else '????',
+       #    ''.join(self.children.keys()),
+       #    ), file=file)
 
         for v in self.children.values():
-            v.print(strings)
+            v.print(strings, file)
 
     def dot(self, strings, file):
         for k in sorted(self.children):
@@ -195,8 +196,8 @@ class SuffixTree:
         self._string_id += 1
 
 
-    def print(self):
-        self._root.print(self._strings)
+    def print(self, file=sys.stdout):
+        self._root.print(self._strings, file)
 
     def _preprocess_lca(self):
         self._lca = LCA(self._root)
