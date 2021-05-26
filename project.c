@@ -1014,10 +1014,136 @@ int st_add_text(st_tree_t *const tree, st_builder_t *builder, text_t const *t) {
 }
 
 /**
+ * Add a character which matched with an existing edge label
+ * In this case, we need only check whether the character is terminal or not
+ *
+ * @param   builder     builder of the suffix tree
+ * @param   next_node   node in the tree where the current edge leads to
+ * @param   text        text being added
+ * @param   ch          character being added
+ *
+ * @return  whether the character is terminal
+ */
+bool st_add_matching_char(st_builder_t *builder, st_node_t *next_node,
+                          text_t const *text, dna_t ch) {
+    if (ch == DNA_TERM) { /* a terminal character */
+        st_node_add_text(next_node, text->t_id);
+        if (!builder->b_terminal) {
+            st_builder_add_suffix_link(builder, builder->b_active_node);
+            builder->b_terminal = true;
+        }
+    } else { /* we are just matching with the edge label */
+        builder->b_active_length += 1;
+        st_builder_add_suffix_link(builder, builder->b_active_node);
+    }
+
+    return ch == DNA_TERM;
+}
+
+/**
+ * Add a character which did not matched with an existing edge label
+ * In this case, we need to split the tree.
+ *
+ * Eg: ch = G
+ *                           *---(next node)
+ *                          /
+ * +--+      ATA        +--+
+ * |  |---------------->|  |----...
+ * +--+                 +--+
+ *
+ *                           *---(split node)          *---(next node)
+ *                          /                         /
+ * +--+      AT         +--+          A           +--+
+ * |  |---------------->|  |--------------------->|  |----...
+ * +--+                 +--+                      +--+
+ *                          \      G     +--+
+ *                           *---------->|  |
+ *                                       +--+
+ *                                           \
+ *                                            *---(new_leaf)
+ *
+ *
+ * @param   tree      the tree to be created
+ * @param   builder   the current builder
+ * @param   next_node node in the tree where the current edge leads to
+ * @param   text      text being added
+ * @param   ch        the character to be added
+ * @param   phase     phase of the character being added
+ *
+ * @return  0   success
+ *         -1   failure
+ */
+int st_add_mismatching_char(st_tree_t *tree, st_builder_t *builder,
+                            st_node_t *next_node, text_t const *text, dna_t ch,
+                            size_t phase) {
+    st_node_t *new_leaf = NULL;
+    st_node_t *split_node = xmalloc(sizeof(st_node_t));
+    if (st_node_create(split_node, next_node->st_start,
+                       next_node->st_start + builder->b_active_length - 1,
+                       next_node->st_id, tree->st_n_texts) != 0) {
+        return -1;
+    }
+
+    builder->b_active_node->st_children[builder->b_active_edge] = split_node;
+    new_leaf = st_add_leaf(tree, builder, text->t_id, phase);
+    if (new_leaf == NULL) {
+        return -1;
+    }
+
+    split_node->st_children[ch] = new_leaf;
+
+    next_node->st_start += builder->b_active_length;
+    split_node->st_children[tree->st_texts[next_node->st_id]
+                                .t_text[next_node->st_start]] = next_node;
+    st_builder_add_suffix_link(builder, split_node);
+    return 0;
+}
+
+/**
+ * Add a character when there is no following node.
+ * In this case, we just create the leaf with that edge
+ *
+ * Eg: ch == text[phase] == A
+ *
+ *      *---(active node)
+ *     /
+ * +--+       A        +--+
+ * |  |--------------->|  |
+ * +--+                +--+
+ *                         \
+ *                          *---(leaf)
+ *
+ *
+ * @param   tree      the tree to be created
+ * @param   builder   the current builder
+ * @param   text      text being added
+ * @param   phase     phase of the character being added
+ *
+ * @return  0   success
+ *         -1   failure
+ */
+int st_add_char_new_leaf(st_tree_t *tree, st_builder_t *builder,
+                         text_t const *text, size_t phase) {
+    st_node_t *new_leaf = NULL;
+    new_leaf = st_add_leaf(tree, builder, text->t_id, phase);
+    if (new_leaf == NULL) {
+        return -1;
+    }
+
+    builder->b_active_node->st_children[builder->b_active_edge] = new_leaf;
+    st_builder_add_suffix_link(builder, builder->b_active_node);
+
+    return 0;
+}
+
+/**
  * Add a new character to the suffix tree
  *
  * @param   tree      the tree to be created
+ * @param   builder   the current builder
+ * @param   text      text being added
  * @param   ch        the character to be added
+ * @param   phase     phase of the character being added
  *
  * @return  0   success
  *         -1   failure
@@ -1025,8 +1151,7 @@ int st_add_text(st_tree_t *const tree, st_builder_t *builder, text_t const *t) {
 int st_add_char(st_tree_t *const tree, st_builder_t *builder,
                 text_t const *text, dna_t ch, size_t phase) {
     st_node_t *next_node = NULL;
-    st_node_t *split_node = NULL;
-    st_node_t *leaf = NULL;
+    dna_t active_ch = DNA_EPSILON;
 
     builder->b_current_end = phase;
     builder->b_need_slink = NULL;
@@ -1044,61 +1169,27 @@ int st_add_char(st_tree_t *const tree, st_builder_t *builder,
                 continue;
             }
 
-            if (tree->st_texts[next_node->st_id] /* NOLINT */
-                    .t_text[next_node->st_start + builder->b_active_length] ==
-                ch) {
-                /* there is a match */
-                if (ch == DNA_TERM) { /* a terminal character */
-                    st_node_add_text(next_node, text->t_id);
-                    if (!builder->b_terminal) {
-                        st_builder_add_suffix_link(builder,
-                                                   builder->b_active_node);
-                        builder->b_terminal = true;
-                    }
-                } else { /* we are just matching with the edge label */
-                    builder->b_active_length += 1;
-                    st_builder_add_suffix_link(builder, builder->b_active_node);
+            /* next character in the edge label */
+            active_ch =
+                tree->st_texts[next_node->st_id] /* NOLINT */
+                    .t_text[next_node->st_start + builder->b_active_length];
+            if (active_ch == ch) {
+                if (!st_add_matching_char(builder, next_node, text, ch)) {
                     break;
                 }
             } else {
-                /* this does not match, we need to break this up
-                 *
-                 * the split node is still associated with the previous
-                 * node
-                 */
-                split_node = xmalloc(sizeof(st_node_t));
-                if (st_node_create(
-                        split_node, next_node->st_start,
-                        next_node->st_start + builder->b_active_length - 1,
-                        next_node->st_id, tree->st_n_texts) != 0) {
+                if (st_add_mismatching_char(tree, builder, next_node, text, ch,
+                                            phase) != 0) {
                     return -1;
                 }
-
-                builder->b_active_node->st_children[builder->b_active_edge] =
-                    split_node;
-                leaf = st_add_leaf(tree, builder, text->t_id, phase);
-                if (leaf == NULL) {
-                    return -1;
-                }
-
-                split_node->st_children[ch] = leaf;
-
-                next_node->st_start += builder->b_active_length;
-                split_node->st_children[tree->st_texts[next_node->st_id]
-                                            .t_text[next_node->st_start]] =
-                    next_node;
-                st_builder_add_suffix_link(builder, split_node);
             }
         } else {
-            leaf = st_add_leaf(tree, builder, text->t_id, phase);
-            if (leaf == NULL) {
+            if (st_add_char_new_leaf(tree, builder, text, phase) != 0) {
                 return -1;
             }
-
-            builder->b_active_node->st_children[builder->b_active_edge] = leaf;
-            st_builder_add_suffix_link(builder, builder->b_active_node);
         }
 
+        /* when traversing, either increment or follow suffix link */
         if (builder->b_active_node == tree->st_root &&
             builder->b_active_length > 0) {
             builder->b_active_edge_idx += 1;
