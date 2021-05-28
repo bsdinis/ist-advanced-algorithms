@@ -10,6 +10,10 @@
 #include <stdlib.h>
 #include <string.h>
 
+#ifndef NDEBUG
+#define NDEBUG
+#endif
+
 #define LINE_SIZE (4096)
 #define DEFAULT_VEC_SIZE (16)
 
@@ -70,9 +74,9 @@ static size_t NODE_ID = 0; /* NOLINT */
 
 /**
  * Utility functions for memory management:
- *  - xmalloc ====> malloc
+ *  - xmalloc =====> malloc
  *  - xrealloc ====> realloc
- *  - xcalloc ====> calloc
+ *  - xcalloc =====> calloc
  *
  *  These functions check for OOM or other errors when allocating memory,
  *  exiting after printing to stderr. They are actually macros which inject
@@ -229,8 +233,8 @@ char dna_to_char(dna_t dna) { return "ACTG$\x00"[dna]; }
  *
  * @return     number of characters read (excluding null byte);
  */
-ssize_t readline_into_buffer(FILE *stream, dna_t *buffer, size_t size) {
-    ssize_t i = 0;
+size_t readline_into_buffer(FILE *stream, dna_t *buffer, size_t size) {
+    size_t i = 0;
     int32_t ch = fgetc(stream);
     while (ch != '\n' && ch != EOF && i < size) {
         buffer[i++] = char_to_dna(ch);
@@ -303,7 +307,7 @@ int text_create(text_t *text, FILE *stream, size_t size, int id) {
     text->t_size = size + 1;
     text->t_text = xmalloc((size + 1) * sizeof(dna_t));
 #ifdef NDEBUG
-    readline_into_buffer(stream, &text->t_text, size);
+    readline_into_buffer(stream, text->t_text, size);
 #else
     text->t_str = xmalloc((size + 1) * sizeof(char));
     readline_into_buffer_str(stream, text->t_str, text->t_text, size);

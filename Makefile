@@ -2,7 +2,7 @@ CFLAGS = -Wall -Wextra -Wshadow -Wcast-align -Wunused -Wpedantic -Wconversion -W
 
 CFLAGS += -std=c89 -ansi -pedantic
 #CFLAGS += -fsanitize=address,leak
-#CFLAGS += -fsanitize=thread
+#CFLAGS + -fsanitize=thread
 #CFLAGS += -fsanitize=memory
 
 # debug setting
