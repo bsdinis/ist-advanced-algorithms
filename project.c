@@ -844,7 +844,6 @@ void print_visitor(st_node_t *node, void *args) {
         }
     }
     fputc('\n', p_args->stream);
-#if 0
     fprintf(p_args->stream, "[%p | %2d] \"", (void *)node, node->st_id);
     if (node->st_id < 0) {
         fprintf(p_args->stream, "<root>\"");
@@ -859,7 +858,6 @@ void print_visitor(st_node_t *node, void *args) {
                 node->st_end);
     }
 
-    /*
     fputs("\" => [", p_args->stream);
     for (idx = 0; idx < DNA_SIGMA_SIZE; ++idx) {
         if (node->st_children[idx] != NULL) {
@@ -872,9 +870,7 @@ void print_visitor(st_node_t *node, void *args) {
     if (node->st_slink) {
         fprintf(p_args->stream, " ~~~> %p", (void *)node->st_slink);
     }
-    */
     fputc('\n', p_args->stream);
-#endif
 }
 
 /**
@@ -1435,7 +1431,6 @@ int main() {
     stream = fopen("c_sol.dot", "we");
     st_dot(&generalized_tree, stream);
     fclose(stream);
-    /*st_print(&generalized_tree, stderr);*/
 #endif
 
     lcs = xcalloc(generalized_tree.st_n_texts - 1, sizeof(size_t));
